@@ -165,7 +165,7 @@ func TestAuthFlow_PolicyEnforcement(t *testing.T) {
 // obtain a token, verify it works, wait for expiry, verify rejection,
 // then re-acquire and verify the new token works.
 func TestAuthFlow_TokenRefreshExpiry(t *testing.T) {
-	idp := testidp.Start(t, testidp.WithTokenTTL(500*time.Millisecond))
+	idp := testidp.Start(t, testidp.WithTokenTTL(50*time.Millisecond))
 	idp.RegisterClient("test-ns/ephemeral", "eph-secret")
 
 	// Obtain initial token
@@ -178,7 +178,7 @@ func TestAuthFlow_TokenRefreshExpiry(t *testing.T) {
 	}
 
 	// Wait for expiry
-	time.Sleep(600 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	if _, valid := idp.ValidateToken(token1); valid {
 		t.Fatal("token1 should be expired after TTL")
