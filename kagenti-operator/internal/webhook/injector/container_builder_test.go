@@ -77,9 +77,10 @@ func TestBuildEnvoyProxyContainer_HasAllRequiredMounts(t *testing.T) {
 	container := builder.BuildEnvoyProxyContainerWithSpireOption(true)
 
 	requiredMounts := map[string]string{
-		"envoy-config": "/etc/envoy",
-		"shared-data":  "/shared",
-		"svid-output":  "/opt",
+		"envoy-config":              "/etc/envoy",
+		"shared-data":               "/shared",
+		"svid-output":               "/opt",
+		"authbridge-runtime-config": "/etc/authbridge",
 	}
 
 	mountsByName := make(map[string]string)
@@ -699,5 +700,58 @@ func TestBuildEnvoyProxyContainer_HasExpectedAudienceFromConfigMap(t *testing.T)
 	}
 	if !found {
 		t.Error("envoy-proxy container missing EXPECTED_AUDIENCE env var from ConfigMap")
+	}
+}
+
+func TestBuildProxySidecarContainer_SpireDisabled(t *testing.T) {
+	builder := NewContainerBuilder(config.CompiledDefaults())
+	container := builder.BuildProxySidecarContainer(false)
+
+	if container.Name != AuthBridgeProxyContainerName {
+		t.Errorf("container name = %q, want %q", container.Name, AuthBridgeProxyContainerName)
+	}
+	if container.Image != config.CompiledDefaults().Images.AuthBridgeLight {
+		t.Errorf("image = %q, want %q", container.Image, config.CompiledDefaults().Images.AuthBridgeLight)
+	}
+
+	// Should have --config args (mode comes from per-agent ConfigMap, not CLI)
+	if len(container.Args) < 2 || container.Args[0] != "--config" {
+		t.Errorf("args = %v, want [--config /etc/authbridge/config.yaml]", container.Args)
+	}
+
+	// Should have reverse-proxy and forward-proxy ports
+	portNames := map[string]bool{}
+	for _, p := range container.Ports {
+		portNames[p.Name] = true
+	}
+	if !portNames["reverse-proxy"] {
+		t.Error("missing reverse-proxy port")
+	}
+	if !portNames["forward-proxy"] {
+		t.Error("missing forward-proxy port")
+	}
+
+	// Should NOT have svid-output volume mount (SPIRE disabled)
+	for _, vm := range container.VolumeMounts {
+		if vm.Name == "svid-output" {
+			t.Error("svid-output volume mount should not be present when SPIRE is disabled")
+		}
+	}
+}
+
+func TestBuildProxySidecarContainer_SpireEnabled(t *testing.T) {
+	builder := NewContainerBuilder(config.CompiledDefaults())
+	container := builder.BuildProxySidecarContainer(true)
+
+	// Should have svid-output volume mount
+	found := false
+	for _, vm := range container.VolumeMounts {
+		if vm.Name == "svid-output" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("svid-output volume mount should be present when SPIRE is enabled")
 	}
 }

@@ -381,6 +381,11 @@ func (b *ContainerBuilder) BuildEnvoyProxyContainerWithSpireOption(spireEnabled 
 			MountPath: "/etc/authproxy",
 			ReadOnly:  true,
 		},
+		{
+			Name:      "authbridge-runtime-config",
+			MountPath: "/etc/authbridge",
+			ReadOnly:  true,
+		},
 	}
 	if spireEnabled {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
@@ -401,6 +406,7 @@ func (b *ContainerBuilder) BuildEnvoyProxyContainerWithSpireOption(spireEnabled 
 		Name:            EnvoyProxyContainerName,
 		Image:           b.cfg.Images.EnvoyProxy,
 		ImagePullPolicy: b.cfg.Images.PullPolicy,
+		Args:            []string{"--config", "/etc/authbridge/config.yaml"},
 		Resources:       b.cfg.Resources.EnvoyProxy,
 		Ports: []corev1.ContainerPort{
 			{
@@ -428,6 +434,70 @@ func (b *ContainerBuilder) BuildEnvoyProxyContainerWithSpireOption(spireEnabled 
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                ptr.To(b.cfg.Proxy.UID),
 			RunAsGroup:               ptr.To(b.cfg.Proxy.UID),
+			RunAsNonRoot:             ptr.To(true),
+			AllowPrivilegeEscalation: ptr.To(false),
+		},
+		VolumeMounts: volumeMounts,
+	}
+}
+
+// BuildProxySidecarContainer creates a lightweight authbridge container for proxy-sidecar mode.
+// Uses authbridge-light image (no Envoy). The app uses HTTP_PROXY env vars to route
+// outbound traffic through the forward proxy. Inbound traffic goes through the reverse proxy.
+func (b *ContainerBuilder) BuildProxySidecarContainer(spireEnabled bool) corev1.Container {
+	return b.BuildProxySidecarContainerWithPorts(spireEnabled, 8080, 8000, 8081)
+}
+
+// BuildProxySidecarContainerWithPorts creates a proxy-sidecar container with dynamic ports.
+// reverseProxyPort: where the reverse proxy listens (takes over the agent's original port)
+// agentBackendPort: where the agent actually listens (moved to a free port)
+// forwardProxyPort: where the forward proxy listens (HTTP_PROXY target)
+func (b *ContainerBuilder) BuildProxySidecarContainerWithPorts(spireEnabled bool, reverseProxyPort, agentBackendPort, forwardProxyPort int32) corev1.Container {
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "shared-data",
+			MountPath: "/shared",
+		},
+		{
+			Name:      "authbridge-runtime-config",
+			MountPath: "/etc/authbridge",
+			ReadOnly:  true,
+		},
+		{
+			Name:      AuthproxyRoutesConfigMapName,
+			MountPath: "/etc/authproxy",
+			ReadOnly:  true,
+		},
+	}
+	if spireEnabled {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "svid-output",
+			MountPath: "/opt",
+		})
+	}
+
+	return corev1.Container{
+		Name:            AuthBridgeProxyContainerName,
+		Image:           b.cfg.Images.AuthBridgeLight,
+		ImagePullPolicy: b.cfg.Images.PullPolicy,
+		Args: []string{
+			"--config", "/etc/authbridge/config.yaml",
+		},
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "reverse-proxy",
+				ContainerPort: reverseProxyPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+			{
+				Name:          "forward-proxy",
+				ContainerPort: forwardProxyPort,
+				Protocol:      corev1.ProtocolTCP,
+			},
+		},
+		Resources: b.cfg.Resources.EnvoyProxy,
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:                ptr.To(int64(1001)),
 			RunAsNonRoot:             ptr.To(true),
 			AllowPrivilegeEscalation: ptr.To(false),
 		},
