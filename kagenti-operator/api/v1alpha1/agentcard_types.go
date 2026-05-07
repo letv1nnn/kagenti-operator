@@ -119,6 +119,11 @@ type AgentCardStatus struct {
 	// +optional
 	CardId string `json:"cardId,omitempty"`
 
+	// AttestedAgentSpiffeID is the SPIFFE ID extracted from the agent's TLS peer certificate
+	// during authenticated (mTLS) fetch. Set only when verifiedFetch is enabled and successful.
+	// +optional
+	AttestedAgentSpiffeID string `json:"attestedAgentSpiffeId,omitempty"`
+
 	// ExpectedSpiffeID is the SPIFFE ID used for binding evaluation.
 	// +optional
 	ExpectedSpiffeID string `json:"expectedSpiffeID,omitempty"`
@@ -342,11 +347,12 @@ type SkillParameter struct {
 // +kubebuilder:printcolumn:name="Kind",type="string",JSONPath=".status.targetRef.kind",description="Workload Kind"
 // +kubebuilder:printcolumn:name="Target",type="string",JSONPath=".status.targetRef.name",description="Target Workload"
 // +kubebuilder:printcolumn:name="Agent",type="string",JSONPath=".status.card.name",description="Agent Name"
-// +kubebuilder:printcolumn:name="Verified",type="boolean",JSONPath=".status.validSignature",description="Signature Verified"
+// +kubebuilder:printcolumn:name="Verified",type="string",JSONPath=".status.conditions[?(@.type=='Verified')].status",description="Identity Verified"
 // +kubebuilder:printcolumn:name="Bound",type="boolean",JSONPath=".status.bindingStatus.bound",description="Identity Bound"
 // +kubebuilder:printcolumn:name="Synced",type="string",JSONPath=".status.conditions[?(@.type=='Synced')].status",description="Sync Status"
 // +kubebuilder:printcolumn:name="LastSync",type="date",JSONPath=".status.lastSyncTime",description="Last Sync Time"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="AttestedAgent",type="string",JSONPath=".status.attestedAgentSpiffeId",description="Attested Agent SPIFFE ID",priority=1
 
 // AgentCard is the Schema for the agentcards API.
 type AgentCard struct {

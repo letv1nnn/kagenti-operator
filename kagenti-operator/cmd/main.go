@@ -42,6 +42,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
+
 	agentv1alpha1 "github.com/kagenti/operator/api/v1alpha1"
 	"github.com/kagenti/operator/internal/agentcard"
 	"github.com/kagenti/operator/internal/controller"
@@ -89,8 +91,8 @@ func main() {
 	var enableOperatorClientRegistration bool
 	var enableMLflow bool
 
-	var enableOperatorSigning bool
-	var spiffeEndpointSocket string
+	var enableVerifiedFetch bool
+	var verifiedFetchSpiffeSocket string
 
 	var spireTrustDomain string
 	var spireTrustBundleConfigMapName string
@@ -133,10 +135,11 @@ func main() {
 	flag.BoolVar(&enableMLflow, "enable-mlflow", false,
 		"Enable MLflow experiment tracking integration")
 
-	flag.BoolVar(&enableOperatorSigning, "enable-operator-signing", false,
-		"Operator signs agent cards with its own SPIFFE identity instead of the init-container")
-	flag.StringVar(&spiffeEndpointSocket, "spiffe-endpoint-socket", "unix:///spiffe-workload-api/spire-agent.sock",
-		"SPIFFE Workload API socket path for operator signing")
+	flag.BoolVar(&enableVerifiedFetch, "enable-verified-fetch", false,
+		"Enable mTLS-authenticated fetch of agent cards via SPIFFE identity")
+	flag.StringVar(&verifiedFetchSpiffeSocket, "verified-fetch-spiffe-socket",
+		"unix:///spiffe-workload-api/spire-agent.sock",
+		"SPIFFE Workload API socket path for verified fetch")
 
 	flag.StringVar(&spireTrustDomain, "spire-trust-domain", "",
 		"SPIRE trust domain for identity binding (e.g. 'example.org')")
@@ -287,10 +290,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if !requireA2ASignature {
-		setupLog.Info("WARNING: --require-a2a-signature is false. Identity binding requires " +
-			"--require-a2a-signature=true to function. AgentCards with spec.identityBinding " +
-			"will always report NotBound.")
+	if !requireA2ASignature && !enableVerifiedFetch {
+		setupLog.Info("WARNING: Neither --require-a2a-signature nor --enable-verified-fetch is set. " +
+			"Identity binding requires at least one trust mechanism to function. " +
+			"AgentCards with spec.identityBinding will report NotBound.")
 	}
 
 	var sigProvider signature.Provider
@@ -329,8 +332,34 @@ func main() {
 	}
 
 	agentFetcher := agentcard.NewConfigMapFetcher(mgr.GetAPIReader())
-	if enableOperatorSigning {
-		agentFetcher = agentcard.NewFetcher()
+
+	var authenticatedFetcher agentcard.AuthenticatedFetcher
+	if enableVerifiedFetch {
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 30*time.Second)
+		fetchX509Source, fetchSourceErr := workloadapi.NewX509Source(
+			fetchCtx,
+			workloadapi.WithClientOptions(workloadapi.WithAddr(verifiedFetchSpiffeSocket)),
+		)
+		fetchCancel()
+
+		if fetchSourceErr != nil {
+			setupLog.Info("WARNING: SPIRE unavailable for verified fetch, falling back to default fetcher",
+				"error", fetchSourceErr.Error(),
+				"socket", verifiedFetchSpiffeSocket)
+			enableVerifiedFetch = false
+		} else {
+			td := spireTrustDomain
+			if td == "" {
+				setupLog.Error(errors.New("missing required flag"),
+					"--spire-trust-domain is required when --enable-verified-fetch=true")
+				os.Exit(1)
+			}
+			authenticatedFetcher = agentcard.NewSpiffeFetcher(fetchX509Source, td)
+			defer fetchX509Source.Close() //nolint:errcheck
+			setupLog.Info("Verified fetch enabled (mTLS via SPIFFE)",
+				"socket", verifiedFetchSpiffeSocket,
+				"trustDomain", td)
+		}
 	}
 
 	agentCardReconciler := &controller.AgentCardReconciler{
@@ -338,25 +367,13 @@ func main() {
 		Scheme:                mgr.GetScheme(),
 		Recorder:              mgr.GetEventRecorderFor("agentcard-controller"),
 		AgentFetcher:          agentFetcher,
+		AuthenticatedFetcher:  authenticatedFetcher,
+		EnableVerifiedFetch:   enableVerifiedFetch,
 		SignatureProvider:     sigProvider,
 		RequireSignature:      requireA2ASignature,
 		SignatureAuditMode:    signatureAuditMode,
 		SpireTrustDomain:      spireTrustDomain,
 		SVIDExpiryGracePeriod: svidExpiryGracePeriod,
-		EnableOperatorSign:    enableOperatorSigning,
-	}
-
-	if enableOperatorSigning {
-		cardSigner, signerErr := signature.NewSpiffeSigner(ctx, spiffeEndpointSocket)
-		if signerErr != nil {
-			setupLog.Error(signerErr, "unable to create SPIFFE signer for operator signing")
-			os.Exit(1)
-		}
-		defer cardSigner.Close() //nolint:errcheck // best-effort cleanup on shutdown
-		agentCardReconciler.CardSigner = cardSigner
-		agentCardReconciler.CardWriter = agentcard.NewWriter(mgr.GetClient(), mgr.GetAPIReader(), mgr.GetScheme())
-		setupLog.Info("Operator AgentCard signing enabled",
-			"spiffeEndpointSocket", spiffeEndpointSocket)
 	}
 
 	if err = agentCardReconciler.SetupWithManager(mgr); err != nil {
@@ -369,6 +386,7 @@ func main() {
 			Client:                 mgr.GetClient(),
 			Scheme:                 mgr.GetScheme(),
 			EnforceNetworkPolicies: enforceNetworkPolicies,
+			OperatorNamespace:      os.Getenv("POD_NAMESPACE"),
 		}
 		npReconciler.DiscoverKubeAPIServerCIDRs(
 			context.Background(), mgr.GetAPIReader(),
@@ -377,7 +395,7 @@ func main() {
 			setupLog.Error(err, "unable to create controller", "controller", "AgentCardNetworkPolicy")
 			os.Exit(1)
 		}
-		setupLog.Info("Network policy enforcement enabled for signature verification")
+		setupLog.Info("Network policy enforcement enabled for identity verification")
 	}
 
 	if err = (&controller.AgentCardSyncReconciler{
