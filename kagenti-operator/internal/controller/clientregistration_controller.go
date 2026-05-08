@@ -99,7 +99,8 @@ func (r *ClientRegistrationReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	dep := &appsv1.Deployment{}
-	if err := r.Get(ctx, req.NamespacedName, dep); err == nil {
+	err = r.Get(ctx, req.NamespacedName, dep)
+	if err == nil {
 		return r.reconcileOne(ctx, dep, injectTools, dep.Name, &dep.Spec.Template,
 			func(ctx context.Context) error {
 				return retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -113,13 +114,13 @@ func (r *ClientRegistrationReconciler) Reconcile(ctx context.Context, req ctrl.R
 					return r.Update(ctx, d)
 				})
 			})
-	}
-	if !apierrors.IsNotFound(err) {
+	} else if !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
 
 	sts := &appsv1.StatefulSet{}
-	if err := r.Get(ctx, req.NamespacedName, sts); err == nil {
+	err = r.Get(ctx, req.NamespacedName, sts)
+	if err == nil {
 		return r.reconcileOne(ctx, sts, injectTools, sts.Name, &sts.Spec.Template,
 			func(ctx context.Context) error {
 				return retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -133,23 +134,23 @@ func (r *ClientRegistrationReconciler) Reconcile(ctx context.Context, req ctrl.R
 					return r.Update(ctx, s)
 				})
 			})
-	}
-	if !apierrors.IsNotFound(err) {
+	} else if !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
 
 	sbx := &unstructured.Unstructured{}
 	sbx.SetGroupVersionKind(sandboxGVK)
-	if err := r.Get(ctx, req.NamespacedName, sbx); err != nil {
+	if err = r.Get(ctx, req.NamespacedName, sbx); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 	podLabels, _, _ := unstructured.NestedStringMap(sbx.Object, "spec", "podTemplate", "metadata", "labels")
+	podAnnotations, _, _ := unstructured.NestedStringMap(sbx.Object, "spec", "podTemplate", "metadata", "annotations")
 	saName, _, _ := unstructured.NestedString(sbx.Object, "spec", "podTemplate", "spec", "serviceAccountName")
 	syntheticTemplate := &corev1.PodTemplateSpec{
-		ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
+		ObjectMeta: metav1.ObjectMeta{Labels: podLabels, Annotations: podAnnotations},
 		Spec:       corev1.PodSpec{ServiceAccountName: saName},
 	}
 	return r.reconcileOne(ctx, sbx, injectTools, sbx.GetName(), syntheticTemplate,
@@ -169,7 +170,9 @@ func (r *ClientRegistrationReconciler) Reconcile(ctx context.Context, req ctrl.R
 					annotations = map[string]string{}
 				}
 				annotations[AnnotationKeycloakClientSecretName] = secretName
-				_ = unstructured.SetNestedStringMap(fresh.Object, annotations, "spec", "podTemplate", "metadata", "annotations")
+				if err := unstructured.SetNestedStringMap(fresh.Object, annotations, "spec", "podTemplate", "metadata", "annotations"); err != nil {
+					return fmt.Errorf("setting podTemplate annotations: %w", err)
+				}
 				return r.Update(ctx, fresh)
 			})
 		})
