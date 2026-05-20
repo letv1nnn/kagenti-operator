@@ -102,6 +102,49 @@ static_resources:
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
+{{- if .SpireEnabled }}
+  - name: agent_tls_listener
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: {{ .TLSPort }}
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: agent_tls
+          codec_type: AUTO
+          route_config:
+            name: agent_tls_routes
+            virtual_hosts:
+            - name: local_app_tls
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  cluster: original_destination
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+            - certificate_chain:
+                filename: /opt/svid.pem
+              private_key:
+                filename: /opt/svid_key.pem
+            validation_context:
+              trusted_ca:
+                filename: /opt/svid_bundle.pem
+{{- end }}
+
   clusters:
   - name: original_destination
     connect_timeout: 30s

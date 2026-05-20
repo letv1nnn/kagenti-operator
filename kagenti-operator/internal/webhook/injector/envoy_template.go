@@ -34,6 +34,10 @@ type envoyTemplateData struct {
 	OutboundPort int32
 	InboundPort  int32
 	ExtProcPort  int32
+	// SpireEnabled gates the TLS listener for verified fetch.
+	SpireEnabled bool
+	// TLSPort is the port for the HTTPS listener (used when SpireEnabled is true).
+	TLSPort int32
 }
 
 // Default ext-proc gRPC port (go-processor).

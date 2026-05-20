@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,14 +44,18 @@ const NetworkPolicyFinalizer = "agentcard.kagenti.dev/network-policy"
 
 var networkPolicyLogger = ctrl.Log.WithName("controller").WithName("AgentCardNetworkPolicy")
 
-// AgentCardNetworkPolicyReconciler manages NetworkPolicies based on AgentCard signature status.
+// AgentCardNetworkPolicyReconciler manages NetworkPolicies based on AgentCard verification status.
 type AgentCardNetworkPolicyReconciler struct {
 	client.Client
 	Scheme                 *runtime.Scheme
 	EnforceNetworkPolicies bool
+	// OperatorNamespace is the namespace the operator runs in. Used to allow
+	// ingress from the operator in generated NetworkPolicies via the built-in
+	// kubernetes.io/metadata.name label (no manual namespace labeling required).
+	OperatorNamespace string
 	// KubeAPIServerCIDRs are the /32 CIDRs of the K8s API server endpoints.
 	// Populated at startup from the "kubernetes" Endpoints in the default namespace.
-	// Used to allow init-container egress to the API server in restrictive policies.
+	// Used to allow workload egress to the API server in restrictive policies.
 	KubeAPIServerCIDRs []string
 }
 
@@ -143,10 +148,10 @@ func (r *AgentCardNetworkPolicyReconciler) manageNetworkPolicy(ctx context.Conte
 	policyName := fmt.Sprintf("%s-signature-policy", workloadName)
 
 	isVerified := false
-	if agentCard.Spec.IdentityBinding != nil {
-		isVerified = agentCard.Status.SignatureIdentityMatch != nil && *agentCard.Status.SignatureIdentityMatch
-	} else {
-		isVerified = agentCard.Status.ValidSignature != nil && *agentCard.Status.ValidSignature
+
+	verifiedCond := meta.FindStatusCondition(agentCard.Status.Conditions, ConditionVerified)
+	if verifiedCond != nil {
+		isVerified = verifiedCond.Status == metav1.ConditionTrue
 	}
 
 	if isVerified {
@@ -163,7 +168,7 @@ func (r *AgentCardNetworkPolicyReconciler) upsertNetworkPolicy(ctx context.Conte
 			Labels: map[string]string{
 				"managed-by":              "kagenti-operator",
 				"kagenti.dev/agentcard":   agentCard.Name,
-				"kagenti.dev/policy-type": "signature-verification",
+				"kagenti.dev/policy-type": "identity-verification",
 			},
 		},
 		Spec: spec,
@@ -195,7 +200,7 @@ func (r *AgentCardNetworkPolicyReconciler) createPermissivePolicy(
 	ctx context.Context, policyName string,
 	agentCard *agentv1alpha1.AgentCard, podSelectorLabels map[string]string,
 ) error {
-	ingressRule := operatorIngressRule()
+	ingressRule := r.operatorIngressRule()
 	ingressRule.From = append(ingressRule.From, netv1.NetworkPolicyPeer{
 		PodSelector: &metav1.LabelSelector{
 			MatchLabels: map[string]string{LabelSignatureVerified: "true"},
@@ -212,21 +217,22 @@ func (r *AgentCardNetworkPolicyReconciler) createPermissivePolicy(
 	return r.upsertNetworkPolicy(ctx, policyName, agentCard, spec)
 }
 
-func operatorIngressRule() netv1.NetworkPolicyIngressRule {
-	return netv1.NetworkPolicyIngressRule{
-		From: []netv1.NetworkPolicyPeer{
-			{
-				NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"control-plane": "kagenti-operator"},
-				},
-			},
-			{
-				NamespaceSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"name": "kagenti-system"},
-				},
+func (r *AgentCardNetworkPolicyReconciler) operatorIngressRule() netv1.NetworkPolicyIngressRule {
+	peers := []netv1.NetworkPolicyPeer{
+		{
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": r.OperatorNamespace},
 			},
 		},
 	}
+	if r.OperatorNamespace != ClusterDefaultsNamespace {
+		peers = append(peers, netv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": ClusterDefaultsNamespace},
+			},
+		})
+	}
+	return netv1.NetworkPolicyIngressRule{From: peers}
 }
 
 func (r *AgentCardNetworkPolicyReconciler) createRestrictivePolicy(
@@ -237,17 +243,17 @@ func (r *AgentCardNetworkPolicyReconciler) createRestrictivePolicy(
 	spec := netv1.NetworkPolicySpec{
 		PodSelector: metav1.LabelSelector{MatchLabels: podSelectorLabels},
 		PolicyTypes: []netv1.PolicyType{netv1.PolicyTypeIngress, netv1.PolicyTypeEgress},
-		Ingress:     []netv1.NetworkPolicyIngressRule{operatorIngressRule()},
+		Ingress:     []netv1.NetworkPolicyIngressRule{r.operatorIngressRule()},
 		Egress:      r.kubeAPIEgressRules(),
 	}
 	return r.upsertNetworkPolicy(ctx, policyName, agentCard, spec)
 }
 
 // kubeAPIEgressRules returns egress rules that allow only traffic to the
-// K8s API server endpoints on port 6443. This permits init containers
-// (e.g. agentcard-signer) to write ConfigMaps while blocking all other
-// outbound traffic. If no API server CIDRs are configured, returns an
-// empty list (deny-all egress).
+// K8s API server endpoints on port 6443. This permits workloads to
+// communicate with the API server while blocking all other outbound
+// traffic. If no API server CIDRs are configured, returns an empty
+// list (deny-all egress).
 func (r *AgentCardNetworkPolicyReconciler) kubeAPIEgressRules() []netv1.NetworkPolicyEgressRule {
 	if len(r.KubeAPIServerCIDRs) == 0 {
 		return []netv1.NetworkPolicyEgressRule{}
