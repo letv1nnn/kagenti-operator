@@ -18,6 +18,7 @@ package injector
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -123,6 +124,13 @@ func (b *ContainerBuilder) BuildEnvoyProxyContainerWithSpireOption(spireEnabled 
 				MountPath: "/etc/spiffe-helper",
 				ReadOnly:  true,
 			},
+			// SPIRE workload-API socket — bundled spiffe-helper dials it.
+			// Path derived from SpiffeConfig.SocketPath (defaults.go).
+			corev1.VolumeMount{
+				Name:      "spire-agent-socket",
+				MountPath: spireSocketDir(b.cfg.Spiffe.SocketPath),
+				ReadOnly:  true,
+			},
 		)
 	}
 
@@ -187,6 +195,19 @@ func spireEnabledStr(b bool) string {
 	return "false"
 }
 
+// spireSocketDir returns the directory portion of the SPIRE workload-API
+// socket path (e.g. "unix:///spiffe-workload-api/spire-agent.sock" →
+// "/spiffe-workload-api"), suitable for use as a container mountPath.
+// Single source of truth: defaults.go's SpiffeConfig.SocketPath.
+func spireSocketDir(socketPath string) string {
+	stripped := strings.TrimPrefix(socketPath, "unix://")
+	dir := path.Dir(stripped)
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return dir
+}
+
 // BuildProxySidecarContainer creates a combined authbridge container for proxy-sidecar mode.
 // Uses the authbridge image (authbridge-proxy + spiffe-helper bundled, no Envoy).
 // The app uses HTTP_PROXY env vars to route outbound traffic through the forward proxy.
@@ -233,6 +254,13 @@ func (b *ContainerBuilder) BuildProxySidecarContainerWithPorts(spireEnabled bool
 			corev1.VolumeMount{
 				Name:      "spiffe-helper-config",
 				MountPath: "/etc/spiffe-helper",
+				ReadOnly:  true,
+			},
+			// SPIRE workload-API socket — bundled spiffe-helper dials it.
+			// Path derived from SpiffeConfig.SocketPath (defaults.go).
+			corev1.VolumeMount{
+				Name:      "spire-agent-socket",
+				MountPath: spireSocketDir(b.cfg.Spiffe.SocketPath),
 				ReadOnly:  true,
 			},
 		)
