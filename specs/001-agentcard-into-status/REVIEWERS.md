@@ -18,8 +18,8 @@ A new `fetchAndUpdateCard` phase is added to the existing AgentRuntime reconcile
 
 **Applies when**:
 - The operator is started with `--enable-card-discovery=true`
-- An AgentRuntime targets a Deployment whose Pods serve `/.well-known/agent-card.json`
-- The backing Deployment rolls out (pod template hash changes)
+- An AgentRuntime targets a workload (Deployment, StatefulSet, or Sandbox) whose Pods serve `/.well-known/agent-card.json`
+- The backing workload rolls out (pod template hash or generation changes)
 
 **Does not apply when**:
 - `--enable-card-discovery` is not set (default). No card fetch occurs.
@@ -30,7 +30,7 @@ A new `fetchAndUpdateCard` phase is added to the existing AgentRuntime reconcile
 
 1. **Extend existing controller (not a new one)**: The card fetch is a single HTTP GET added to the existing reconcile loop. Creating a separate controller would add coordination complexity for minimal isolation benefit. If performance becomes an issue at scale, extraction is a clean refactor.
 
-2. **Selector match for service resolution**: Resolves the Deployment's Pod selector labels to find the matching Service. Falls back from name-based convention (matching AgentCard behavior) to selector matching. No annotations required.
+2. **Selector match for service resolution**: Resolves the workload's (Deployment, StatefulSet, Sandbox) Pod selector labels to find the matching Service. Falls back from name-based convention (matching AgentCard behavior) to selector matching. No annotations required.
 
 3. **Retain stale data on fetch failure**: When a fetch fails, the last successful card data is kept in `status.card`. The `CardSynced` condition and `fetchedAt` timestamp signal staleness. This avoids disruption for tools that consume `status.card`.
 

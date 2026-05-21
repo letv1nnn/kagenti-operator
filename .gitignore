@@ -61,4 +61,3 @@ Dockerfile.cross
 .claude/settings.json
 .claude/settings.local.json
 .specify/
-brainstorm/

@@ -9,7 +9,7 @@
 
 ### Session 2026-05-21
 
-- Q: How should the controller discover the Service endpoint for a given AgentRuntime's targetRef Deployment? → A: Selector match: resolve Deployment Pod selector, find Services whose selector matches, use the first match.
+- Q: How should the controller discover the Service endpoint for a given AgentRuntime's targetRef workload? → A: Selector match: resolve the workload's Pod selector, find Services whose selector matches, use the first match.
 - Q: What happens to previously populated status.card data when a card fetch fails? → A: Retain last successful card data; rely on the CardSynced condition and fetchedAt timestamp to signal staleness.
 - Q: What happens to existing status.card data when the feature flag is toggled off? → A: Clear status.card on the next reconcile of each AgentRuntime when the flag is disabled.
 - Q: What should status.card contain, given mTLS is in scope? → A: Card payload fields, fetch metadata (fetchedAt, cardId, protocol), and verification fields (signature validation, SPIFFE identity). mTLS reuses infrastructure from PR #284.
@@ -26,9 +26,9 @@ A platform operator queries a single resource (AgentRuntime) to see what an agen
 
 **Acceptance Scenarios**:
 
-1. **Given** an AgentRuntime targeting a Deployment whose Pods serve a valid A2A agent card at `/.well-known/agent-card.json`, **When** the controller reconciles the AgentRuntime, **Then** `status.card` contains the agent's name, description, skills, capabilities, endpoint URL, fetchedAt timestamp, cardId content hash, and detected protocol.
-2. **Given** an AgentRuntime whose `status.card` is already populated, **When** the backing Deployment rolls out a new Pod template (hash change), **Then** the controller re-fetches the card and updates `status.card` with the new content.
-3. **Given** an AgentRuntime targeting a Deployment, **When** the agent's card endpoint is unreachable or returns invalid JSON, **Then** `status.card` retains the last successfully fetched data and a `CardSynced` condition indicates the fetch failure with a human-readable reason.
+1. **Given** an AgentRuntime targeting a workload (Deployment, StatefulSet, or Sandbox) whose Pods serve a valid A2A agent card at `/.well-known/agent-card.json`, **When** the controller reconciles the AgentRuntime, **Then** `status.card` contains the agent's name, description, skills, capabilities, endpoint URL, fetchedAt timestamp, cardId content hash, and detected protocol.
+2. **Given** an AgentRuntime whose `status.card` is already populated, **When** the backing workload rolls out a new Pod template (hash change or generation change), **Then** the controller re-fetches the card and updates `status.card` with the new content.
+3. **Given** an AgentRuntime targeting a workload, **When** the agent's card endpoint is unreachable or returns invalid JSON, **Then** `status.card` retains the last successfully fetched data and a `CardSynced` condition indicates the fetch failure with a human-readable reason.
 
 ---
 
@@ -83,10 +83,12 @@ A cluster administrator controls whether the new card discovery behavior is acti
 
 - What happens when the agent's Service has multiple ports? The controller uses selector matching to find the Service, then targets the port serving the A2A protocol (by well-known port name or the first HTTP port).
 - How does the system handle a card endpoint that returns a valid JSON response but not a valid A2A agent card structure? The controller treats it as a fetch failure, retains any previously fetched data, and surfaces the parsing error in the `CardSynced` condition.
-- What happens when the backing Deployment has zero ready Pods? The controller skips the card fetch and sets a condition indicating the workload is not ready.
-- What happens if the card response is excessively large? The controller enforces a size limit on the response body to prevent resource exhaustion.
-- What happens when no Service matches the Deployment's Pod selector? The controller sets the `CardSynced` condition to false with reason "ServiceNotFound" and skips the fetch.
+- What happens when the backing workload has zero ready Pods? The controller skips the card fetch and sets a condition indicating the workload is not ready.
+- What happens if the card response is excessively large? The controller enforces a size limit on the response body (1 MiB) to prevent resource exhaustion.
+- What happens when no Service matches the workload's Pod selector? The controller sets the `CardSynced` condition to false with reason "ServiceNotFound" and skips the fetch.
 - What happens when the mTLS handshake fails (e.g., certificate expired, wrong trust domain)? The controller retains stale card data and reports the TLS error in the `CardSynced` condition.
+- What happens if the card fetch hangs or is slow? The controller enforces a 10-second timeout on the HTTP/mTLS request. Timeout is treated as a fetch failure (stale data retained, `CardSynced=False`).
+- What happens when an agent updates its card content without a workload rollout (e.g., hot-reloading skills)? The controller does not detect this. Card data in `status.card` reflects the state at the last rollout. This is an intentional constraint: event-driven fetch (no polling) trades freshness of dynamic card changes for reduced API server and network load.
 
 ## Requirements *(mandatory)*
 
@@ -99,7 +101,7 @@ A cluster administrator controls whether the new card discovery behavior is acti
 - **FR-005**: The system MUST gate the card fetch behavior behind a feature flag that defaults to disabled.
 - **FR-006**: The system MUST emit a deprecation log warning when a new AgentCard CR is created.
 - **FR-007**: The system MUST record a `fetchedAt` timestamp in `status.card` so operators can see when the card data was last refreshed.
-- **FR-008**: The system MUST resolve the agent's Service endpoint by matching the Deployment's Pod selector labels to Services in the same namespace (selector match), using the first matching Service.
+- **FR-008**: The system MUST resolve the agent's Service endpoint by matching the workload's Pod selector labels to Services in the same namespace (selector match), using the first matching Service. This applies to all supported workload types (Deployment, StatefulSet, Sandbox).
 - **FR-009**: The system MUST enforce a maximum response body size when fetching the card to prevent resource exhaustion.
 - **FR-010**: The system MUST support mTLS for the card fetch, reusing the SPIFFE/SPIRE infrastructure from PR #284. When mTLS is configured on the AgentRuntime, the controller uses the workload's SVID to establish a verified connection.
 - **FR-011**: The system MUST populate verification fields in `status.card` (attested SPIFFE ID, signature validation result) when the card is fetched over mTLS and the card contains JWS signatures.
@@ -122,9 +124,38 @@ A cluster administrator controls whether the new card discovery behavior is acti
 - **SC-004**: The feature can be enabled or disabled at operator startup without redeployment of agent workloads. Disabling clears stale card data from all AgentRuntimes.
 - **SC-005**: When mTLS is configured, the card fetch verifies the agent's SPIFFE identity and validates JWS signatures, with results visible in `status.card`.
 
+## Out of Scope (with migration path)
+
+The following are explicitly out of scope for this iteration. Each item includes the intended migration path so the deprecation trajectory is visible.
+
+### Identity binding policy (`spec.identityBinding`)
+
+Identity binding is a **workload identity policy** that validates whether an agent's SPIFFE ID belongs to a configured trust domain. It is orthogonal to card discovery: the card fetch is merely the mechanism that surfaces the SPIFFE ID, but the binding evaluation and enforcement are about the workload, not the card content.
+
+**Current home**: `AgentCard.spec.identityBinding` (trustDomain, strict)
+**Intended destination**: `AgentRuntime.spec` in a follow-up iteration, alongside the existing `spec.identity.spiffe.trustDomain` field.
+**During coexistence**: Identity binding policy stays on AgentCard. The AgentCard controller continues to evaluate binding and propagate the `signature-verified` label. No enforcement behavior changes.
+**Brainstorm**: See `brainstorm/02-identity-binding-migration.md` for detailed analysis.
+
+### Enforcement actions (label propagation, NetworkPolicy)
+
+The current AgentCard controller propagates the `signature-verified` label to workloads based on identity verification results. The NetworkPolicy controller uses this label to gate inter-agent traffic.
+
+**This PR**: `status.card` on AgentRuntime is purely observational. It surfaces verification results but does not drive enforcement actions.
+**During coexistence**: The AgentCard controller continues to handle all enforcement (label propagation, NetworkPolicy). No enforcement behavior changes.
+**Future iteration**: When identity binding moves to AgentRuntime.spec, the enforcement logic (label propagation) moves to the AgentRuntime controller. This is a separate spec.
+
+### AgentCardSyncReconciler
+
+The `AgentCardSyncReconciler` auto-creates AgentCard CRs for labelled agent workloads. It continues to function during coexistence. Its deprecation and removal will be part of the AgentCard CRD removal iteration (after identity binding migration is complete).
+
+### AgentCard CRD removal and migration tooling
+
+Full CRD removal, ValidatingAdmissionPolicy for label restriction, and migration tooling are deferred until identity binding and enforcement have migrated to AgentRuntime.
+
 ## Assumptions
 
-- Each AgentRuntime targets exactly one Deployment, and there is at most one Service matching that Deployment's Pod selector in the same namespace.
+- Each AgentRuntime targets exactly one workload (Deployment, StatefulSet, or Sandbox), and there is at most one Service matching that workload's Pod selector in the same namespace.
 - The card fetch adds negligible latency to the reconcile loop (single HTTP/mTLS GET, typically sub-second).
 - The existing `AgentCardData` Go struct (already defined in the codebase) can be extended or wrapped to include fetch metadata and verification fields for `status.card`.
 - IBM maintainers have agreed to the AgentCard deprecation path (confirmed 2026-05-15 per brainstorm context).
