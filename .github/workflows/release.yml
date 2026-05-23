@@ -117,15 +117,14 @@ jobs:
       run: |
         # Idempotent: the release may have been pre-created out of band
         # (e.g., a maintainer ran `gh release create` before pushing the
-        # tag). Treat 422 "already_exists" as success so the workflow
-        # doesn't fail on a benign race.
-        if ! gh release create "${{ github.ref_name }}" --generate-notes 2> /tmp/release.err; then
-          if grep -q "already_exists\|Release.tag_name already exists" /tmp/release.err; then
-            echo "Release ${{ github.ref_name }} already exists; skipping create."
-          else
-            cat /tmp/release.err >&2
-            exit 1
-          fi
+        # tag for custom notes). Use `gh release view` to short-circuit
+        # rather than grepping stderr from `gh release create` — that
+        # text is locale-dependent and a moving target across gh
+        # versions.
+        if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+          echo "Release ${{ github.ref_name }} already exists; skipping create."
+        else
+          gh release create "${{ github.ref_name }}" --generate-notes
         fi
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
