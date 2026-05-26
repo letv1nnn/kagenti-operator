@@ -329,6 +329,59 @@ func TestMLflowCRDPresent_NonOCP_UsesOAuthAuth(t *testing.T) {
 	assertContains(t, config, "oauth2client/mlflow", "Expected OAuth2 client auth on non-OCP")
 }
 
+// --- mlflowInfoFromCR negative tests ---
+
+func TestMLflowInfoFromCR_EmptyAddressURL(t *testing.T) {
+	cr := &mlflow.MLflow{
+		ObjectMeta: metav1.ObjectMeta{Name: "mlflow"},
+		Status: mlflow.MLflowStatus{
+			Address: &mlflow.MLflowAddress{URL: ""},
+			URL:     "https://mlflow-external.example.com",
+		},
+	}
+	info := mlflowInfoFromCR(cr, logr.Discard())
+	if !info.available {
+		t.Fatal("Expected available=true")
+	}
+	if info.tracesURL != "https://mlflow-external.example.com/v1/traces" {
+		t.Fatalf("Expected fallback to Status.URL, got tracesURL=%q", info.tracesURL)
+	}
+}
+
+func TestMLflowInfoFromCR_MalformedURL(t *testing.T) {
+	cr := &mlflow.MLflow{
+		ObjectMeta: metav1.ObjectMeta{Name: "mlflow"},
+		Status: mlflow.MLflowStatus{
+			Address: &mlflow.MLflowAddress{URL: "://badurl"},
+			URL:     "https://mlflow-fallback.example.com",
+		},
+	}
+	info := mlflowInfoFromCR(cr, logr.Discard())
+	if !info.available {
+		t.Fatal("Expected available=true")
+	}
+	if info.tracesURL != "https://mlflow-fallback.example.com/v1/traces" {
+		t.Fatalf("Expected fallback to Status.URL for malformed address, got tracesURL=%q", info.tracesURL)
+	}
+}
+
+func TestMLflowInfoFromCR_MissingSchemeFallback(t *testing.T) {
+	cr := &mlflow.MLflow{
+		ObjectMeta: metav1.ObjectMeta{Name: "mlflow"},
+		Status: mlflow.MLflowStatus{
+			Address: &mlflow.MLflowAddress{URL: "//mlflow.ns.svc:8443"},
+			URL:     "https://mlflow-fallback.example.com",
+		},
+	}
+	info := mlflowInfoFromCR(cr, logr.Discard())
+	if !info.available {
+		t.Fatal("Expected available=true")
+	}
+	if info.tracesURL != "https://mlflow-fallback.example.com/v1/traces" {
+		t.Fatalf("Expected fallback when scheme is empty, got tracesURL=%q", info.tracesURL)
+	}
+}
+
 // --- Phoenix tests ---
 
 func TestPhoenixPresent_MergesPhoenixPreset(t *testing.T) {

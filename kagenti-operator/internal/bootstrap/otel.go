@@ -356,7 +356,7 @@ func mlflowInfoFromCR(cr *mlflow.MLflow, log logr.Logger) *mlflowInfo {
 
 	if cr.Status.Address != nil && cr.Status.Address.URL != "" {
 		parsed, err := url.Parse(cr.Status.Address.URL)
-		if err == nil {
+		if err == nil && parsed.Scheme != "" && parsed.Host != "" {
 			hostname := parsed.Hostname()
 			parts := strings.SplitN(hostname, ".", 3)
 			if len(parts) >= 2 {
@@ -368,7 +368,8 @@ func mlflowInfoFromCR(cr *mlflow.MLflow, log logr.Logger) *mlflowInfo {
 				"tracesURL", info.tracesURL, "workspaceNS", info.workspaceNS)
 			return info
 		}
-		log.Info("Could not parse MLflow address URL, falling back", "url", cr.Status.Address.URL, "error", err)
+		log.Info("MLflow address URL missing scheme or host, falling back",
+			"url", cr.Status.Address.URL)
 	}
 
 	if cr.Status.URL != "" {
