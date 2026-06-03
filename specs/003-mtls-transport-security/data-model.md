@@ -1,0 +1,105 @@
+# Data Model: mTLS Transport Security for Agent Communication
+
+## Entity Changes
+
+### Modified: AgentRuntimeSpec
+
+| Field | Change | Before | After |
+|-------|--------|--------|-------|
+| `mTLSMode` | Default changed | `disabled` | `permissive` |
+
+No new fields added to spec. The existing `mTLSMode` field (enum: `disabled`, `permissive`, `strict`) is reused with a changed default.
+
+### Modified: AgentRuntimeStatus (via conditions)
+
+New condition type added:
+
+| Condition | Description |
+|-----------|-------------|
+| `MTLSReady` | Whether mTLS infrastructure (SPIRE) is available for this workload |
+
+### Existing: CardStatus (AgentRuntime status.card)
+
+No changes to the struct. The following fields are already defined and will be populated by the mTLS-enabled card fetch:
+
+| Field | Type | Description | Populated When |
+|-------|------|-------------|---------------|
+| `transportSecurity` | TransportSecurity | `mtls` or `http` | Every card fetch |
+| `attestedAgentSpiffeID` | string | SPIFFE ID from peer certificate | mTLS card fetch |
+| `validSignature` | *bool | JWS signature validation result | Signature present (deprecated path) |
+
+### New Condition: MTLSReady
+
+Added to AgentRuntime `status.conditions[]`.
+
+| Reason | Status | When |
+|--------|--------|------|
+| `SPIREAvailable` | True | SPIRE is deployed and certificates are available to the workload |
+| `SPIREUnavailable` | False | mTLSMode is permissive or strict but SPIRE infrastructure is not detected |
+| `MTLSDisabled` | True | mTLSMode is explicitly set to `disabled` |
+
+### Modified: Authbridge ConfigMap
+
+The operator-generated authbridge ConfigMap gains an `mtls:` block when mTLSMode is non-disabled.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mtls.mode` | string | `permissive` or `strict` — matches AgentRuntime's mTLSMode |
+
+When `mTLSMode` is `disabled`, the `mtls:` block is omitted entirely (authbridge defaults to plaintext).
+
+### Modified: Feature Flags (cmd/main.go)
+
+| Flag | Before Default | After Default | Notes |
+|------|---------------|---------------|-------|
+| `--enable-verified-fetch` | `false` | `true` | Kill switch retained for one release |
+| `--require-a2a-signature` | `true` | `false` | Deprecated |
+| `--signature-audit-mode` | `true` | `false` | Deprecated |
+| `--enforce-network-policies` | `true` | `false` | Deprecated |
+
+## Relationships
+
+```
+AgentRuntime.spec.mTLSMode
+    │
+    ├── Operator generates authbridge ConfigMap with mtls: block
+    │       │
+    │       └── Authbridge sidecar reads config, enables mTLS listeners
+    │               │
+    │               ├── Inbound (reverse proxy): mTLS termination
+    │               └── Outbound (forward proxy): mTLS origination
+    │
+    ├── Operator sets MTLSReady condition on AgentRuntime.status
+    │       │
+    │       ├── SPIREAvailable (True) — SPIRE detected
+    │       ├── SPIREUnavailable (False) — SPIRE not detected
+    │       └── MTLSDisabled (True) — mTLSMode: disabled
+    │
+    └── Controller uses SpiffeFetcher (when SPIRE available)
+            │
+            └── Fetches A2A card from live agent over mTLS
+                    │
+                    ├── status.card.transportSecurity = "mtls"
+                    └── status.card.attestedAgentSpiffeID = <SPIFFE ID>
+```
+
+## State Transitions for mTLSMode
+
+```
+[Default: permissive] -- operator sets mTLSMode: strict --> [Strict]
+[Default: permissive] -- operator sets mTLSMode: disabled --> [Disabled]
+[Strict] -- operator removes mTLSMode --> [Default: permissive]
+[Disabled] -- operator removes mTLSMode --> [Default: permissive]
+
+ConfigMap hash changes on every mTLSMode transition → rolling restart
+```
+
+## State Transitions for MTLSReady condition
+
+```
+[Not Set] -- reconcile with mTLSMode non-disabled + SPIRE available --> [True/SPIREAvailable]
+[Not Set] -- reconcile with mTLSMode non-disabled + SPIRE absent --> [False/SPIREUnavailable]
+[Not Set] -- reconcile with mTLSMode: disabled --> [True/MTLSDisabled]
+[False/SPIREUnavailable] -- SPIRE deployed --> [True/SPIREAvailable]
+[True/SPIREAvailable] -- mTLSMode changed to disabled --> [True/MTLSDisabled]
+```
