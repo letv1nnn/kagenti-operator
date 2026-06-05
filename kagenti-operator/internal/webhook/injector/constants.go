@@ -38,6 +38,17 @@ const (
 	ClientAuthTypeFederatedJWT = "federated-jwt"
 )
 
+// proxy-init MODE values — select the iptables strategy that
+// BuildProxyInitContainer passes to init-iptables.sh.
+const (
+	// ProxyInitModeRedirect transparently REDIRECTs pod traffic to the Envoy
+	// listeners (envoy-sidecar mode).
+	ProxyInitModeRedirect = "redirect"
+	// ProxyInitModeEnforceDrop installs the fail-closed egress guard that DROPs
+	// any egress bypassing the forward proxy (proxy-sidecar egress enforcement).
+	ProxyInitModeEnforceDrop = "enforce-drop"
+)
+
 // mTLS modes for the proxy-sidecar / lite paths. Selected per workload
 // via AgentRuntime CR `Spec.MTLSMode`, falling back to the namespace
 // `authbridge-runtime-config` ConfigMap's `mtls.mode` field, then
