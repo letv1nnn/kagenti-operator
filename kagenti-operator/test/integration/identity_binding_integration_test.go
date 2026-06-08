@@ -97,7 +97,7 @@ type mockFetcher struct{}
 
 func (f *mockFetcher) Fetch(_ context.Context, _, _ string, _ string, _ string) (*agentcard.FetchResult, error) {
 	return &agentcard.FetchResult{
-		Card: &agentv1alpha1.AgentCardData{
+		CardData: &agentv1alpha1.AgentCardData{
 			Name: "test-agent",
 			URL:  "http://test:8000",
 		},

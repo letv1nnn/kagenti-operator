@@ -82,7 +82,7 @@ type mockFetcherWithSignedCard struct {
 
 func (f *mockFetcherWithSignedCard) Fetch(_ context.Context, _, _, _, _ string) (*agentcard.FetchResult, error) {
 	return &agentcard.FetchResult{
-		Card:                   f.cardData,
+		CardData:               f.cardData,
 		RawSignedAgentCardJSON: f.rawSignedAgentCardJSON,
 	}, nil
 }

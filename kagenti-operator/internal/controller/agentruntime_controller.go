@@ -191,14 +191,15 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		logger.Error(istioErr, "Failed to ensure Istio mesh labels")
 		r.setCondition(rt, ConditionTypeIstioMeshEnrolled, metav1.ConditionFalse, "PatchFailed", istioErr.Error())
 		if r.Recorder != nil {
-			r.Recorder.Event(rt, corev1.EventTypeWarning, "IstioMeshLabelError", istioErr.Error())
+			r.Recorder.Eventf(rt, nil, corev1.EventTypeWarning, "IstioMeshLabelError",
+				"EnsureIstioMesh", istioErr.Error())
 		}
 	case istioLabeled:
 		r.setCondition(rt, ConditionTypeIstioMeshEnrolled, metav1.ConditionTrue, "NamespaceLabeled",
 			fmt.Sprintf("Namespace %s enrolled in Istio ambient mesh", rt.Namespace))
 		if r.Recorder != nil {
-			r.Recorder.Event(rt, corev1.EventTypeNormal, "IstioMeshEnrolled",
-				fmt.Sprintf("Namespace %s labeled for Istio ambient mesh", rt.Namespace))
+			r.Recorder.Eventf(rt, nil, corev1.EventTypeNormal, "IstioMeshEnrolled",
+				"EnsureIstioMesh", "Namespace %s labeled for Istio ambient mesh", rt.Namespace)
 		}
 	default:
 		r.setCondition(rt, ConditionTypeIstioMeshEnrolled, metav1.ConditionFalse, "OptedOut",

@@ -64,8 +64,8 @@ func ConfigMapName(agentName string) string {
 
 // FetchResult is the outcome of fetching agent card content from ConfigMap and/or HTTP.
 type FetchResult struct {
-	CardData               *agentv1alpha1.AgentCardData
-	AgentSpiffeID          string
+	CardData      *agentv1alpha1.AgentCardData
+	AgentSpiffeID string
 	// RawSignedAgentCardJSON is non-nil when the source document was a SignedAgentCard
 	// (agentCard + attestations). Used for Sigstore bundle verification.
 	RawSignedAgentCardJSON []byte

@@ -555,7 +555,7 @@ func main() {
 		SigstoreAuditMode:          sigstoreAuditMode,
 		SpireTrustDomain:           spireTrustDomain,
 		SVIDExpiryGracePeriod:      svidExpiryGracePeriod,
-	}).SetupWithManager(mgr); err != nil{
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentCard")
 		os.Exit(1)
 	}

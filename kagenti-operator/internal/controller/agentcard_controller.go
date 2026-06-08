@@ -904,7 +904,7 @@ func (r *AgentCardReconciler) updateAgentCardStatus(
 				Reason:  ReasonSignatureInvalid,
 				Message: verificationResult.Details,
 			})
-		// Check if Sigstore verification failed (when not in audit mode)
+			// Check if Sigstore verification failed (when not in audit mode)
 		} else if sigstoreResult != nil && !sigstoreResult.Absent && !sigstoreResult.Verified && !r.SigstoreAuditMode {
 			meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
 				Type:    "Synced",
