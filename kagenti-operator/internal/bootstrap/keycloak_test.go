@@ -39,12 +39,15 @@ func keycloakTestScheme() *runtime.Scheme {
 
 func newKeycloakRunnable(objs ...client.Object) *KeycloakBootstrapRunnable {
 	scheme := keycloakTestScheme()
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keycloak"}}
+	allObjs := append([]client.Object{ns}, objs...)
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(allObjs...).Build()
 	return &KeycloakBootstrapRunnable{
-		Client:    cl,
-		APIReader: cl,
-		Namespace: "keycloak",
-		Log:       testLogger(),
+		Client:                 cl,
+		APIReader:              cl,
+		Namespace:              "keycloak",
+		Log:                    testLogger(),
+		RouteDiscoveryAttempts: 1,
 	}
 }
 
@@ -134,6 +137,7 @@ func TestKeycloak_DoesNotOverwriteExistingSecret(t *testing.T) {
 
 func TestKeycloak_CreatesTestUsersSecret(t *testing.T) {
 	r := newKeycloakRunnable()
+	r.KeycloakPublicURL = "https://keycloak.example.com"
 
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatalf("Start() failed: %v", err)
@@ -164,6 +168,7 @@ func TestKeycloak_DoesNotOverwriteTestUsersSecret(t *testing.T) {
 		},
 	}
 	r := newKeycloakRunnable(existingSecret)
+	r.KeycloakPublicURL = "https://keycloak.example.com"
 
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatalf("Start() failed: %v", err)

@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -37,6 +38,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+const fieldManager = "kagenti-operator-bootstrap"
 
 var (
 	keycloakGVK    = schema.GroupVersionKind{Group: "k8s.keycloak.org", Version: "v2alpha1", Kind: "Keycloak"}
@@ -56,20 +59,31 @@ type KeycloakBootstrapRunnable struct {
 	Realm             string
 	KeycloakPublicURL string
 	Log               logr.Logger
+
+	// RouteDiscoveryAttempts controls how many times to poll for Route host (default 6, 5s apart).
+	RouteDiscoveryAttempts int
 }
 
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=create;get;list;patch;update;watch
 // +kubebuilder:rbac:groups="",resources=services,verbs=create;get;list;update;watch
-// +kubebuilder:rbac:groups=k8s.keycloak.org,resources=keycloaks,verbs=create;get;list;update
-// +kubebuilder:rbac:groups=k8s.keycloak.org,resources=keycloakrealmimports,verbs=create;get;list;update
+// +kubebuilder:rbac:groups=k8s.keycloak.org,resources=keycloaks,verbs=create;get;list;patch;update
+// +kubebuilder:rbac:groups=k8s.keycloak.org,resources=keycloakrealmimports,verbs=create;get;list;patch;update
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=create;get;list;update
 
 func (r *KeycloakBootstrapRunnable) Start(ctx context.Context) error {
 	log := r.Log.WithName("keycloak-bootstrap")
+
+	ns := &corev1.Namespace{}
+	if err := r.APIReader.Get(ctx, types.NamespacedName{Name: r.Namespace}, ns); err != nil {
+		log.Info("Keycloak namespace not found, skipping bootstrap", "namespace", r.Namespace)
+		return nil
+	}
+
 	log.Info("Starting Keycloak infrastructure bootstrap", "namespace", r.Namespace)
 
 	if err := r.ensurePostgres(ctx, log); err != nil {
-		return fmt.Errorf("ensuring Postgres: %w", err)
+		log.Error(err, "Failed to ensure Postgres infrastructure")
+		return nil
 	}
 
 	if err := r.ensureKeycloakCR(ctx, log); err != nil {
@@ -126,7 +140,7 @@ func (r *KeycloakBootstrapRunnable) ensureDBSecret(ctx context.Context, log logr
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
 			"username": []byte("testuser"),
-			"password": []byte("thisisonly4testingNOT4prod"),
+			"password": []byte(randomPassword()),
 		},
 	}
 	if err := r.Client.Create(ctx, secret); err != nil && !errors.IsAlreadyExists(err) {
@@ -225,43 +239,21 @@ func (r *KeycloakBootstrapRunnable) ensureService(ctx context.Context, log logr.
 }
 
 func (r *KeycloakBootstrapRunnable) ensureKeycloakCR(ctx context.Context, log logr.Logger) error {
-	existing := &unstructured.Unstructured{}
-	existing.SetGroupVersionKind(keycloakGVK)
-	key := types.NamespacedName{Name: "keycloak", Namespace: r.Namespace}
-
 	desired := keycloakCRSpec()
 
-	if err := r.APIReader.Get(ctx, key, existing); err != nil {
-		if !errors.IsNotFound(err) {
-			return fmt.Errorf("reading Keycloak CR: %w", err)
-		}
-		cr := &unstructured.Unstructured{}
-		cr.SetGroupVersionKind(keycloakGVK)
-		cr.SetName("keycloak")
-		cr.SetNamespace(r.Namespace)
-		cr.SetLabels(keycloakLabels())
-		if err := unstructured.SetNestedField(cr.Object, desired, "spec"); err != nil {
-			return fmt.Errorf("setting Keycloak spec: %w", err)
-		}
-		if err := r.Client.Create(ctx, cr); err != nil {
-			return fmt.Errorf("creating Keycloak CR: %w", err)
-		}
-		log.Info("Created Keycloak CR")
-		return nil
+	cr := &unstructured.Unstructured{}
+	cr.SetGroupVersionKind(keycloakGVK)
+	cr.SetName("keycloak")
+	cr.SetNamespace(r.Namespace)
+	cr.SetLabels(keycloakLabels())
+	if err := unstructured.SetNestedField(cr.Object, desired, "spec"); err != nil {
+		return fmt.Errorf("setting Keycloak spec: %w", err)
 	}
 
-	existingSpec, _, _ := unstructured.NestedMap(existing.Object, "spec")
-	if mapsEqual(existingSpec, desired) {
-		return nil
+	if err := r.Client.Apply(ctx, client.ApplyConfigurationFromUnstructured(cr), client.FieldOwner(fieldManager), client.ForceOwnership); err != nil {
+		return fmt.Errorf("applying Keycloak CR: %w", err)
 	}
-
-	if err := unstructured.SetNestedField(existing.Object, desired, "spec"); err != nil {
-		return fmt.Errorf("patching Keycloak spec: %w", err)
-	}
-	if err := r.Client.Update(ctx, existing); err != nil {
-		return fmt.Errorf("updating Keycloak CR: %w", err)
-	}
-	log.Info("Updated Keycloak CR spec")
+	log.Info("Applied Keycloak CR")
 	return nil
 }
 
@@ -307,20 +299,55 @@ func (r *KeycloakBootstrapRunnable) ensureRoute(ctx context.Context, log logr.Lo
 // --- Realm bootstrap ---
 
 func (r *KeycloakBootstrapRunnable) ensureRealmBootstrap(ctx context.Context, log logr.Logger) error {
+	publicURL := r.KeycloakPublicURL
+	if publicURL == "" {
+		publicURL = r.discoverPublicURL(ctx, log)
+	}
+	if publicURL == "" {
+		log.Info("KeycloakPublicURL not set and Route host not yet available, skipping realm import")
+		return nil
+	}
+
 	passwords, err := r.ensureTestUsersSecret(ctx, log)
 	if err != nil {
 		return err
 	}
 
-	publicURL := r.KeycloakPublicURL
-	if publicURL == "" {
-		publicURL = r.discoverPublicURL(ctx, log)
-		if publicURL != "" {
-			log.Info("Discovered Keycloak public URL from Route", "url", publicURL)
-		}
+	return r.ensureRealmImport(ctx, log, passwords, publicURL)
+}
+
+// discoverPublicURL polls the Keycloak Route for an assigned host, retrying
+// briefly to allow the OpenShift router time to populate spec.host.
+func (r *KeycloakBootstrapRunnable) discoverPublicURL(ctx context.Context, log logr.Logger) string {
+	maxAttempts := 6
+	if r.RouteDiscoveryAttempts > 0 {
+		maxAttempts = r.RouteDiscoveryAttempts
 	}
 
-	return r.ensureRealmImport(ctx, log, passwords, publicURL)
+	for i := range maxAttempts {
+		route := &unstructured.Unstructured{}
+		route.SetGroupVersionKind(routeGVK)
+		if err := r.APIReader.Get(ctx, types.NamespacedName{Name: "keycloak", Namespace: r.Namespace}, route); err != nil {
+			log.V(1).Info("Cannot read Keycloak Route for public URL discovery", "error", err)
+			return ""
+		}
+		host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
+		if host != "" {
+			url := "https://" + host
+			log.Info("Discovered Keycloak public URL from Route", "url", url)
+			return url
+		}
+		if i < maxAttempts-1 {
+			log.V(1).Info("Keycloak Route has no spec.host yet, retrying", "attempt", i+1)
+			select {
+			case <-ctx.Done():
+				return ""
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+	log.Info("Keycloak Route host not populated after retries")
+	return ""
 }
 
 func (r *KeycloakBootstrapRunnable) ensureTestUsersSecret(ctx context.Context, log logr.Logger) (map[string]string, error) {
@@ -372,62 +399,25 @@ func (r *KeycloakBootstrapRunnable) ensureRealmImport(ctx context.Context, log l
 	}
 
 	name := realm + "-realm-import"
-	existing := &unstructured.Unstructured{}
-	existing.SetGroupVersionKind(realmImportGVK)
-	key := types.NamespacedName{Name: name, Namespace: r.Namespace}
-
 	realmSpec := buildRealmSpec(realm, passwords, publicURL)
 
-	if err := r.APIReader.Get(ctx, key, existing); err != nil {
-		if !errors.IsNotFound(err) {
-			return fmt.Errorf("reading KeycloakRealmImport: %w", err)
-		}
-		cr := &unstructured.Unstructured{}
-		cr.SetGroupVersionKind(realmImportGVK)
-		cr.SetName(name)
-		cr.SetNamespace(r.Namespace)
-		cr.SetLabels(keycloakLabels())
-		if err := unstructured.SetNestedField(cr.Object, "keycloak", "spec", "keycloakCRName"); err != nil {
-			return fmt.Errorf("setting keycloakCRName: %w", err)
-		}
-		if err := unstructured.SetNestedField(cr.Object, realmSpec, "spec", "realm"); err != nil {
-			return fmt.Errorf("setting realm spec: %w", err)
-		}
-		if err := r.Client.Create(ctx, cr); err != nil {
-			return fmt.Errorf("creating KeycloakRealmImport: %w", err)
-		}
-		log.Info("Created KeycloakRealmImport CR", "name", name)
-		return nil
+	cr := &unstructured.Unstructured{}
+	cr.SetGroupVersionKind(realmImportGVK)
+	cr.SetName(name)
+	cr.SetNamespace(r.Namespace)
+	cr.SetLabels(keycloakLabels())
+	if err := unstructured.SetNestedField(cr.Object, "keycloak", "spec", "keycloakCRName"); err != nil {
+		return fmt.Errorf("setting keycloakCRName: %w", err)
+	}
+	if err := unstructured.SetNestedField(cr.Object, realmSpec, "spec", "realm"); err != nil {
+		return fmt.Errorf("setting realm spec: %w", err)
 	}
 
-	existingRealm, _, _ := unstructured.NestedMap(existing.Object, "spec", "realm")
-	if mapsEqual(existingRealm, realmSpec) {
-		return nil
+	if err := r.Client.Apply(ctx, client.ApplyConfigurationFromUnstructured(cr), client.FieldOwner(fieldManager), client.ForceOwnership); err != nil {
+		return fmt.Errorf("applying KeycloakRealmImport: %w", err)
 	}
-
-	if err := unstructured.SetNestedField(existing.Object, realmSpec, "spec", "realm"); err != nil {
-		return fmt.Errorf("patching realm spec: %w", err)
-	}
-	if err := r.Client.Update(ctx, existing); err != nil {
-		return fmt.Errorf("updating KeycloakRealmImport: %w", err)
-	}
-	log.Info("Updated KeycloakRealmImport CR", "name", name)
+	log.Info("Applied KeycloakRealmImport CR", "name", name)
 	return nil
-}
-
-func (r *KeycloakBootstrapRunnable) discoverPublicURL(ctx context.Context, log logr.Logger) string {
-	route := &unstructured.Unstructured{}
-	route.SetGroupVersionKind(routeGVK)
-	if err := r.APIReader.Get(ctx, types.NamespacedName{Name: "keycloak", Namespace: r.Namespace}, route); err != nil {
-		log.V(1).Info("Cannot read Keycloak Route for public URL discovery", "error", err)
-		return ""
-	}
-	host, _, _ := unstructured.NestedString(route.Object, "spec", "host")
-	if host == "" {
-		log.V(1).Info("Keycloak Route has no spec.host yet")
-		return ""
-	}
-	return "https://" + host
 }
 
 func randomPassword() string {
@@ -554,8 +544,18 @@ func postgresStatefulSet(namespace string) *appsv1.StatefulSet {
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Env: []corev1.EnvVar{
 							{Name: "POSTGRESQL_DATABASE", Value: "postgres"},
-							{Name: "POSTGRESQL_USER", Value: "testuser"},
-							{Name: "POSTGRESQL_PASSWORD", Value: "thisisonly4testingNOT4prod"},
+							{Name: "POSTGRESQL_USER", ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "keycloak-db-secret"},
+									Key:                  "username",
+								},
+							}},
+							{Name: "POSTGRESQL_PASSWORD", ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "keycloak-db-secret"},
+									Key:                  "password",
+								},
+							}},
 						},
 						Ports: []corev1.ContainerPort{{ContainerPort: 5432}},
 						ReadinessProbe: &corev1.Probe{
@@ -591,21 +591,6 @@ func postgresStatefulSet(namespace string) *appsv1.StatefulSet {
 			}},
 		},
 	}
-}
-
-// mapsEqual does a shallow comparison sufficient for detecting spec drift on
-// the top-level keys. For the Keycloak CR this is adequate since we own the
-// entire spec.
-func mapsEqual(a, b map[string]any) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if fmt.Sprintf("%v", v) != fmt.Sprintf("%v", b[k]) {
-			return false
-		}
-	}
-	return true
 }
 
 const postgresSetPasswordsScript = `#!/bin/bash
