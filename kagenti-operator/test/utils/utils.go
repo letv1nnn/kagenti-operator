@@ -759,12 +759,29 @@ func ProbeWebhookTLS(namespace string) error {
 	podName := fmt.Sprintf("webhook-probe-%d", time.Now().UnixNano()%100000)
 	svcURL := fmt.Sprintf("https://kagenti-operator-webhook-service.%s.svc:443/", namespace)
 
+	// Security context required for clusters with "restricted" PodSecurity enforcement.
+	overrides := `{
+		"spec": {
+			"securityContext": {"runAsNonRoot": true, "seccompProfile": {"type": "RuntimeDefault"}},
+			"containers": [{
+				"name": "` + podName + `",
+				"image": "curlimages/curl:latest",
+				"command": ["curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", "` + svcURL + `"],
+				"securityContext": {
+					"allowPrivilegeEscalation": false,
+					"capabilities": {"drop": ["ALL"]},
+					"runAsNonRoot": true,
+					"seccompProfile": {"type": "RuntimeDefault"}
+				}
+			}]
+		}
+	}`
+
 	cmd := exec.Command("kubectl", "run", podName,
 		"--rm", "-i", "--restart=Never",
 		"--image=curlimages/curl:latest",
-		"-n", namespace,
-		"--", "curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}",
-		"--max-time", "5", svcURL)
+		"--overrides", overrides,
+		"-n", namespace)
 	output, err := Run(cmd)
 	if err != nil {
 		return fmt.Errorf("webhook TLS probe failed: %w", err)
