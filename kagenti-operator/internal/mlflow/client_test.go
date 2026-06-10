@@ -431,3 +431,50 @@ func TestRetry_NoRetryOn4xx(t *testing.T) {
 		t.Errorf("expected 1 request (no retries on 4xx), got %d", got)
 	}
 }
+
+func TestBuildTransport_NoCAFile(t *testing.T) {
+	c := &Client{BaseURL: "https://example.com"}
+	transport := c.buildTransport()
+	if transport != nil {
+		t.Error("expected nil transport when CAFile is empty")
+	}
+}
+
+func TestBuildTransport_InvalidCAFile(t *testing.T) {
+	c := &Client{BaseURL: "https://example.com", CAFile: "/nonexistent/ca.pem"}
+	transport := c.buildTransport()
+	if transport != nil {
+		t.Error("expected nil transport when CAFile does not exist")
+	}
+}
+
+func TestBuildTransport_ValidCAFile(t *testing.T) {
+	// Create a temp PEM file with a dummy CA cert
+	caPath := filepath.Join(t.TempDir(), "ca.pem")
+	// Use a self-signed cert PEM (just needs to be parseable)
+	dummyPEM := []byte(`-----BEGIN CERTIFICATE-----
+MIIBkTCB+wIJALRiMLAhBHkfMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnRl
+c3RjYTAeFw0yNDA2MTAxNjAwMDBaFw0yNTA2MTAxNjAwMDBaMBExDzANBgNVBAMM
+BnRlc3RjYTBcMA0GCSqGSIb3DQEBAQUAAwsAMEgCQQC7o96d34FHON3QS39tnWWP
+fm5XO0K5fN5u8S1w7FYQFR18bNLdP3J0u2iAcLGGf3rkUddU2LRBB3qe7YESQQ3
+AgMBAAEwDQYJKoZIhvcNAQELBQADQQBi5xVL+nqUSHmsm15FYkZrJnOXtQj2PT7S
+GgPXqM1T3iA0oBe+n6PBnH7cL9fJcXl9Yl0NWqt8ByPNmNrWJ5R
+-----END CERTIFICATE-----
+`)
+	if err := os.WriteFile(caPath, dummyPEM, 0600); err != nil {
+		t.Fatalf("writing test CA: %v", err)
+	}
+
+	c := &Client{BaseURL: "https://example.com", CAFile: caPath}
+	transport := c.buildTransport()
+	if transport == nil {
+		t.Fatal("expected non-nil transport with valid CA file")
+	}
+	httpTransport, ok := transport.(*http.Transport)
+	if !ok {
+		t.Fatal("expected *http.Transport")
+	}
+	if httpTransport.TLSClientConfig == nil || httpTransport.TLSClientConfig.RootCAs == nil {
+		t.Fatal("expected TLS config with custom RootCAs")
+	}
+}

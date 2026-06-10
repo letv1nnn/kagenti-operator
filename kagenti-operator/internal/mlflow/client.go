@@ -22,6 +22,8 @@ package mlflow
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,6 +65,12 @@ type Client struct {
 
 	// TokenPath is the path to the SA token file. Defaults to DefaultTokenPath.
 	TokenPath string
+
+	// CAFile is an optional path to a PEM-encoded CA certificate bundle to
+	// append to the system cert pool for TLS verification. Used on clusters
+	// where the MLflow gateway uses a non-publicly-trusted certificate
+	// (e.g., HyperShift ingress CA).
+	CAFile string
 
 	// HTTPClient is the HTTP client to use. If nil, a default client is created
 	// on first use with Timeout applied. Must be set before the first request.
@@ -154,11 +162,32 @@ func (c *Client) httpClient() *http.Client {
 	c.httpOnce.Do(func() {
 		if c.HTTPClient == nil {
 			c.HTTPClient = &http.Client{
-				Timeout: c.timeout(),
+				Timeout:   c.timeout(),
+				Transport: c.buildTransport(),
 			}
 		}
 	})
 	return c.HTTPClient
+}
+
+func (c *Client) buildTransport() http.RoundTripper {
+	if c.CAFile == "" {
+		return nil
+	}
+	caPEM, err := os.ReadFile(c.CAFile)
+	if err != nil {
+		return nil
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	pool.AppendCertsFromPEM(caPEM)
+	return &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs: pool,
+		},
+	}
 }
 
 func (c *Client) tokenPath() string {
