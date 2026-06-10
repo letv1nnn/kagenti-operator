@@ -248,17 +248,9 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// 6.5. Discover linked skills from workload annotation (set by kagenti backend or user)
 	fg := r.getFeatureGates()
+	var linkedSkills []string
 	if fg.SkillDiscovery {
-		rt.Status.LinkedSkills = r.readLinkedSkills(ctx, rt)
-		if len(rt.Status.LinkedSkills) > 0 {
-			r.setCondition(rt, ConditionTypeSkillsDiscovered, metav1.ConditionTrue, "SkillsFound",
-				fmt.Sprintf("%d linked skill(s) discovered from workload annotation", len(rt.Status.LinkedSkills)))
-		} else {
-			meta.RemoveStatusCondition(&rt.Status.Conditions, ConditionTypeSkillsDiscovered)
-		}
-	} else {
-		rt.Status.LinkedSkills = nil
-		meta.RemoveStatusCondition(&rt.Status.Conditions, ConditionTypeSkillsDiscovered)
+		linkedSkills = r.readLinkedSkills(ctx, rt)
 	}
 
 	// 7. Count configured pods
@@ -267,12 +259,31 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		logger.V(1).Info("Failed to count configured pods", "error", err)
 	}
 
-	// 8. Update status
+	// 8. Update status (retry on conflict to preserve all conditions computed above)
 	rt.Status.ConfiguredPods = configuredPods
 	r.setPhase(rt, agentv1alpha1.RuntimePhaseActive)
 	r.setCondition(rt, ConditionTypeReady, metav1.ConditionTrue, "Configured",
 		fmt.Sprintf("Workload %s configured with config-hash %s", rt.Spec.TargetRef.Name, configResult.Hash[:12]))
-	if err := r.Status().Update(ctx, rt); err != nil {
+	if fg.SkillDiscovery {
+		rt.Status.LinkedSkills = linkedSkills
+		if len(linkedSkills) > 0 {
+			r.setCondition(rt, ConditionTypeSkillsDiscovered, metav1.ConditionTrue, "SkillsFound",
+				fmt.Sprintf("%d linked skill(s) discovered from workload annotation", len(linkedSkills)))
+		} else {
+			meta.RemoveStatusCondition(&rt.Status.Conditions, ConditionTypeSkillsDiscovered)
+		}
+	} else {
+		rt.Status.LinkedSkills = nil
+		meta.RemoveStatusCondition(&rt.Status.Conditions, ConditionTypeSkillsDiscovered)
+	}
+	desired := rt.Status.DeepCopy()
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := r.Get(ctx, req.NamespacedName, rt); err != nil {
+			return err
+		}
+		rt.Status = *desired // safe: this controller is the sole status owner
+		return r.Status().Update(ctx, rt)
+	}); err != nil {
 		logger.Error(err, "Failed to update status")
 		return ctrl.Result{}, err
 	}
@@ -708,10 +719,6 @@ func (r *AgentRuntimeReconciler) handleDeletion(ctx context.Context, rt *agentv1
 			delete(workloadLabels, LabelManagedBy)
 			acc.obj.SetLabels(workloadLabels)
 
-			// Remove skills annotation from workload metadata.
-			workloadAnnotations := acc.obj.GetAnnotations()
-			delete(workloadAnnotations, AnnotationSkills)
-			acc.obj.SetAnnotations(workloadAnnotations)
 
 			// Remove kagenti.io/type from PodTemplateSpec pod labels so future pods
 			// are not presented to the webhook with the type label.
