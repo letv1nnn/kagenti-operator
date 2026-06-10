@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -26,16 +27,39 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	agentv1alpha1 "github.com/kagenti/operator/api/v1alpha1"
 	"github.com/kagenti/operator/internal/agentcard"
 	webhookconfig "github.com/kagenti/operator/internal/webhook/config"
 )
+
+// updateFailClient wraps a client.Client and rejects Update calls on
+// objects whose Kind matches failKind, simulating RBAC or conflict errors.
+type updateFailClient struct {
+	client.Client
+	failKind string
+}
+
+func (c *updateFailClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	gvks, _, _ := c.Scheme().ObjectKinds(obj)
+	for _, gvk := range gvks {
+		if gvk.Kind == c.failKind {
+			return fmt.Errorf("simulated update failure for %s", c.failKind)
+		}
+	}
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func (c *updateFailClient) Scheme() *runtime.Scheme {
+	return c.Client.Scheme()
+}
 
 type stubCardFetcher struct {
 	card *agentv1alpha1.AgentCardData
@@ -385,6 +409,42 @@ var _ = Describe("AgentRuntime Controller", func() {
 			Expect(targetCond).NotTo(BeNil())
 			Expect(targetCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(targetCond.Reason).To(Equal("TargetNotFound"))
+		})
+	})
+
+	Context("When applyWorkloadConfig fails", func() {
+		It("should set Ready=False with reason ConfigApplyError", func() {
+			dep := newDeployment("apply-fail-deploy", namespace)
+			Expect(k8sClient.Create(ctx, dep)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, dep) }()
+
+			rt := newAgentRuntime("apply-fail-rt", namespace, "apply-fail-deploy", agentv1alpha1.RuntimeTypeAgent)
+			Expect(k8sClient.Create(ctx, rt)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, rt) }()
+
+			// First reconcile with normal client: adds finalizer
+			r := newReconciler()
+			nn := types.NamespacedName{Name: "apply-fail-rt", Namespace: namespace}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Second reconcile with a client that rejects Deployment updates
+			rFail := &AgentRuntimeReconciler{
+				Client:    &updateFailClient{Client: k8sClient, failKind: "Deployment"},
+				APIReader: k8sClient,
+				Scheme:    scheme.Scheme,
+			}
+			result, err := rFail.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).NotTo(BeZero(), "should requeue on config apply error")
+
+			updated := &agentv1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, nn, updated)).To(Succeed())
+
+			readyCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeReady)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal("ConfigApplyError"))
 		})
 	})
 
