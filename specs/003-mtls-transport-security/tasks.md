@@ -34,7 +34,7 @@ The following are already implemented and do NOT need new code:
 - `MTLSMode` field on `AgentRuntimeSpec` with values `disabled`, `permissive`, `strict` (defaults to empty/disabled)
 - `TransportSecurity` enum (`mtls`, `http`) and `CardStatus` struct on status
 - `SpiffeFetcher` / `AuthenticatedFetcher` wired into `fetchCard()` — already chooses mTLS vs HTTP
-- `resolvedConfig.MTLSMode` flows into config hash — hash already changes on mTLSMode change
+- Webhook resolves `MTLSMode` from CR > namespace > default chain and configures authbridge sidecar
 - `--require-a2a-signature`, `--signature-audit-mode`, `--enforce-network-policies` already default to `false`
 - Envoy template has `MTLSEnabled`, `MTLSPermissive`, `MTLSStrict` wiring for TLS contexts
 - Webhook resolves `MTLSMode` from CR > namespace > default chain
@@ -57,14 +57,14 @@ The following are already implemented and do NOT need new code:
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
-**Purpose**: MTLSReady condition logic and ConfigMap mtls block injection
+**Purpose**: MTLSReady condition logic and mTLS annotation on pod template
 
 **CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 [PARTIAL] Add `mtls:` block injection to the authbridge-runtime-config ConfigMap. Currently `resolvedConfig.MTLSMode` flows into the hash but the actual ConfigMap content sent to authbridge may not include a top-level `mtls:` block. Examine how the namespace `authbridge-runtime-config` ConfigMap is created/updated (in `ensureNamespaceConfigMaps()` or `ensurePerAgentConfigMap()`). When `mTLSMode` is `permissive` or `strict`, ensure the authbridge config YAML contains `mtls:\n  mode: <value>`. When `disabled` or empty, omit the block. Verify the `spiffe:` block is present when `mtls:` is included.
+- [ ] T005 [SUPERSEDED → REPLACED] Add `kagenti.io/mtls-mode` annotation to the workload's pod template in `internal/controller/agentruntime_controller.go`. In `applyWorkloadConfig()`, set the annotation value to the resolved `mTLSMode` (`permissive`, `strict`, or `disabled`). When `mTLSMode` changes on the AgentRuntime CR, the annotation value changes, causing Kubernetes to trigger a rolling restart. This replaces the previous ConfigMap-based approach — the webhook reads `mTLSMode` from the AgentRuntime CR at pod CREATE time and sets `MTLS_MODE` env var on the authbridge container. Update the webhook in `internal/webhook/injector/pod_mutator.go` to set this env var.
 - [ ] T006 Add `MTLSReady` condition logic to the reconcile loop in `internal/controller/agentruntime_controller.go`. Insert after target resolution (around line 170) and before the Ready condition (line 251). Logic: if `mTLSMode` resolves to `disabled` or empty-before-default → `MTLSReady=True/MTLSDisabled`; if `permissive` or `strict` → check whether the workload's pod template has spiffe-helper volume mounts or the SPIRE agent socket mount → if present `MTLSReady=True/SPIREAvailable`, if absent `MTLSReady=False/SPIREUnavailable` with message `"mTLS requires SPIRE; either deploy SPIRE or set mTLSMode: disabled"`. Use `r.setCondition()` (existing helper). Follow save/restore pattern around Patch calls (Constitution I).
 
-**Checkpoint**: MTLSReady condition and ConfigMap mtls block ready.
+**Checkpoint**: MTLSReady condition and mTLS annotation ready.
 
 ---
 
@@ -72,20 +72,20 @@ The following are already implemented and do NOT need new code:
 
 **Goal**: Agents deployed with SPIRE communicate over mTLS automatically without explicit mTLSMode configuration because mTLSMode defaults to permissive.
 
-**Independent Test**: Deploy two agent workloads with SPIRE, create AgentRuntimes with no explicit mTLSMode, verify the authbridge config contains `mtls: mode: permissive` and `MTLSReady=True`.
+**Independent Test**: Deploy two agent workloads with SPIRE, create AgentRuntimes with no explicit mTLSMode, verify the pod template has `kagenti.io/mtls-mode: permissive` annotation, authbridge sidecar has `MTLS_MODE=permissive` env var, and `MTLSReady=True`.
 
 ### Tests for User Story 1
 
-- [ ] T007 [P] [US1] Add unit tests for ConfigMap `mtls:` block generation in `internal/controller/agentruntime_controller_test.go`. Test cases: (a) mTLSMode unset (defaults to permissive via kubebuilder marker) → authbridge config contains `mtls: mode: permissive`; (b) mTLSMode `strict` → contains `mtls: mode: strict`; (c) mTLSMode `disabled` → no `mtls:` block. Create objects in envtest and read back from API server (Constitution II).
+- [ ] T007 [P] [US1] Add unit tests for `kagenti.io/mtls-mode` annotation in `internal/controller/agentruntime_controller_test.go`. Test cases: (a) mTLSMode unset (defaults to permissive via kubebuilder marker) → pod template annotation is `kagenti.io/mtls-mode: permissive`; (b) mTLSMode `strict` → annotation is `strict`; (c) mTLSMode `disabled` → annotation is `disabled`. Also test webhook: verify `MTLS_MODE` env var is set on authbridge container. Create objects in envtest and read back from API server (Constitution II).
 - [ ] T008 [P] [US1] Add unit tests for `MTLSReady` condition in `internal/controller/agentruntime_controller_test.go`. Test cases: (a) mTLSMode permissive + spiffe-helper present → `MTLSReady=True/SPIREAvailable`; (b) mTLSMode permissive + no spiffe-helper → `MTLSReady=False/SPIREUnavailable`; (c) mTLSMode disabled → `MTLSReady=True/MTLSDisabled`. Read back AgentRuntime from envtest API server (Constitution II).
-- [ ] T009 [P] [US1] Add unit test for config hash change on mTLSMode transition in `internal/controller/agentruntime_config_test.go`. Verify that the `resolvedConfig` hash differs when mTLSMode changes between `permissive`, `strict`, and `disabled`. This is likely already passing since `MTLSMode` is in the struct — verify and add explicit test case.
+- [ ] T009 [P] [US1] Add unit test for annotation change on mTLSMode transition in `internal/controller/agentruntime_controller_test.go`. Verify that changing mTLSMode from `permissive` to `strict` or `disabled` results in a different `kagenti.io/mtls-mode` annotation on the workload pod template, triggering a rolling restart. Note: mTLSMode is NOT in the config hash (per PR #405) — the annotation is the restart mechanism.
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Wire T005 and T006 into the reconcile flow end-to-end. Create an AgentRuntime with no explicit mTLSMode, reconcile, verify: (a) the resolved mTLSMode is `permissive`; (b) the authbridge config has the `mtls:` block; (c) `MTLSReady` condition is set; (d) config hash includes mTLSMode.
-- [ ] T011 [US1] Verify that changing `mTLSMode` on an existing AgentRuntime triggers a workload rolling restart. The `resolvedConfig` already includes `MTLSMode` in the hash — verify this causes a new `kagenti.io/config-hash` annotation on the pod template.
+- [ ] T010 [US1] Wire T005 and T006 into the reconcile flow end-to-end. Create an AgentRuntime with no explicit mTLSMode, reconcile, verify: (a) the resolved mTLSMode is `permissive`; (b) the pod template has `kagenti.io/mtls-mode: permissive` annotation; (c) `MTLSReady` condition is set; (d) webhook sets `MTLS_MODE` env var on authbridge container.
+- [ ] T011 [US1] Verify that changing `mTLSMode` on an existing AgentRuntime triggers a workload rolling restart via the `kagenti.io/mtls-mode` annotation change on the pod template (NOT via config hash — mTLSMode is excluded from the hash per PR #405).
 
-**Checkpoint**: Agent-to-agent mTLS defaults to permissive. ConfigMap and conditions correct.
+**Checkpoint**: Agent-to-agent mTLS defaults to permissive. Annotation and conditions correct.
 
 ---
 
@@ -174,9 +174,9 @@ The following are already implemented and do NOT need new code:
 | T002 | NEW | make generate && make manifests |
 | T003 | NEW | Flip two flag defaults to true |
 | T004 | NEW | Add deprecation warning logs (flag defaults already false) |
-| T005 | PARTIAL | Inject mtls: block into authbridge config — need to trace ConfigMap generation |
+| T005 | REPLACED | Set `kagenti.io/mtls-mode` annotation on pod template + webhook sets `MTLS_MODE` env var |
 | T006 | NEW | MTLSReady condition logic in reconcile loop |
-| T007-T009 | NEW | Unit tests for ConfigMap, condition, hash |
+| T007-T009 | NEW | Unit tests for annotation, condition, annotation change |
 | T010-T011 | NEW | End-to-end wiring verification |
 | T012-T013 | NEW | Unit tests for SpiffeFetcher default |
 | T014 | DONE | fetchCard() already implements mTLS-first logic |

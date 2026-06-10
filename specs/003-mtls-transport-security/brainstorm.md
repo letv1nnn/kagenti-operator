@@ -70,7 +70,7 @@ Istio, user-supplied certificates, and cert-manager are explicitly out of scope.
 
 ### Q5: Istio integration?
 
-**Answer: Not supported in this iteration.** Istio is explicitly out of scope. No dependency on Istio. The platform uses SPIRE as the sole mTLS provider. Istio support may be added in a future iteration.
+**Answer: Not supported in this iteration.** Istio is explicitly out of scope for this spec. No dependency on Istio. The platform uses SPIRE as the sole mTLS provider. Note: Istio service mesh with L4 mTLS is being worked on separately (PR #383, Issue #399, RHAIENG-5467) — that work is complementary, not competing. See spec.md "Coexistence with Istio mTLS" section.
 
 ## Source Material
 
@@ -186,7 +186,7 @@ Each has its own `main.go`, `Dockerfile`, and `entrypoint.sh`.
 - Potentially: Envoy-specific DownstreamTlsContext/UpstreamTlsContext (if not already done)
 
 **The main remaining work is on the operator side:**
-- Configuring the sidecar ConfigMap with `mtls:` block based on AgentRuntime's `mTLSMode`
+- Setting `kagenti.io/mtls-mode` annotation on pod template + webhook sets `MTLS_MODE` env var on authbridge
 - Making mTLS enabled by default
 - Error conditions when SPIRE is unavailable
 - Controller-to-agent mTLS (SpiffeFetcher integration)

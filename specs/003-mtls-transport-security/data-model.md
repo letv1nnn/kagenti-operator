@@ -38,15 +38,21 @@ Added to AgentRuntime `status.conditions[]`.
 | `SPIREUnavailable` | False | mTLSMode is permissive or strict but SPIRE infrastructure is not detected |
 | `MTLSDisabled` | True | mTLSMode is explicitly set to `disabled` |
 
-### Modified: Authbridge ConfigMap
+### New: Pod Template Annotation
 
-The operator-generated authbridge ConfigMap gains an `mtls:` block when mTLSMode is non-disabled.
+The controller sets a `kagenti.io/mtls-mode` annotation on the workload's pod template. This serves two purposes: (1) triggers a rolling restart when the value changes, and (2) makes the mTLS mode visible on the pod.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `mtls.mode` | string | `permissive` or `strict` — matches AgentRuntime's mTLSMode |
+| Annotation | Values | Set By |
+|------------|--------|--------|
+| `kagenti.io/mtls-mode` | `permissive`, `strict`, `disabled` | Controller (on pod template) |
 
-When `mTLSMode` is `disabled`, the `mtls:` block is omitted entirely (authbridge defaults to plaintext).
+### New: Authbridge Sidecar Env Var
+
+The webhook sets an `MTLS_MODE` environment variable on the authbridge sidecar container at pod CREATE time.
+
+| Env Var | Values | Set By | Read By |
+|---------|--------|--------|---------|
+| `MTLS_MODE` | `permissive`, `strict`, `disabled` | Webhook (at pod CREATE) | Authbridge (at startup) |
 
 ### Modified: Feature Flags (cmd/main.go)
 
@@ -62,9 +68,13 @@ When `mTLSMode` is `disabled`, the `mtls:` block is omitted entirely (authbridge
 ```
 AgentRuntime.spec.mTLSMode
     │
-    ├── Operator generates authbridge ConfigMap with mtls: block
+    ├── Controller sets kagenti.io/mtls-mode annotation on pod template
     │       │
-    │       └── Authbridge sidecar reads config, enables mTLS listeners
+    │       └── Annotation change triggers rolling restart
+    │
+    ├── Webhook reads mTLSMode from AgentRuntime CR at pod CREATE
+    │       │
+    │       └── Sets MTLS_MODE env var on authbridge sidecar container
     │               │
     │               ├── Inbound (reverse proxy): mTLS termination
     │               └── Outbound (forward proxy): mTLS origination

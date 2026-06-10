@@ -6,7 +6,7 @@
 
 ## Summary
 
-Enable mTLS as the default transport security for controller-to-agent and agent-to-agent communication. Authbridge mTLS is already implemented in kagenti-extensions across all proxy modes (envoy, proxy-sidecar, lite). The remaining work is operator-side: configuring sidecar ConfigMaps with the `mtls:` block based on AgentRuntime's `mTLSMode`, defaulting `mTLSMode` to `permissive`, wiring `SpiffeFetcher` as the default card fetcher, adding `MTLSReady` status conditions, and deprecating the JWS signing pipeline flags. SPIRE is the sole certificate provider; Istio is out of scope.
+Enable mTLS as the default transport security for controller-to-agent and agent-to-agent communication. Authbridge mTLS is already implemented in kagenti-extensions across all proxy modes (envoy, proxy-sidecar, lite). The remaining work is operator-side: the controller sets a `kagenti.io/mtls-mode` annotation on the pod template (triggering rolling restart on change), the webhook reads `mTLSMode` from the AgentRuntime CR and sets `MTLS_MODE` env var on the authbridge container, defaulting `mTLSMode` to `permissive`, wiring `SpiffeFetcher` as the default card fetcher, adding `MTLSReady` status conditions, and deprecating the JWS signing pipeline flags. SPIRE is the sole certificate provider; Istio is out of scope.
 
 ## Technical Context
 
@@ -65,9 +65,10 @@ kagenti-operator/
 │   ├── agentruntime_types.go       # MODIFY: mTLSMode default, MTLSReady condition type
 │   └── zz_generated.deepcopy.go    # REGENERATE: after type changes
 ├── internal/controller/
-│   ├── agentruntime_controller.go      # MODIFY: ConfigMap mtls block, MTLSReady condition, SpiffeFetcher default
-│   ├── agentruntime_controller_test.go # MODIFY: tests for mTLS defaults, conditions, ConfigMap
-│   └── agentruntime_config.go          # MODIFY: inject mtls config into merged config
+│   ├── agentruntime_controller.go      # MODIFY: set kagenti.io/mtls-mode annotation, MTLSReady condition, SpiffeFetcher default
+│   ├── agentruntime_controller_test.go # MODIFY: tests for mTLS annotation, conditions, defaults
+├── internal/webhook/injector/
+│   └── pod_mutator.go                  # MODIFY: read mTLSMode from AgentRuntime CR, set MTLS_MODE env var on authbridge
 ├── cmd/
 │   └── main.go                     # MODIFY: flag defaults, deprecation warnings
 ├── config/

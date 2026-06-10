@@ -1,22 +1,22 @@
 # Research: mTLS Transport Security for Agent Communication
 
-## R1: Authbridge MTLS Config Schema
+## R1: Authbridge mTLS Config Delivery (UPDATED)
 
-**Decision**: The authbridge sidecar reads mTLS configuration from a top-level `mtls:` block in its YAML config file. The operator must inject this block into the authbridge ConfigMap.
+**Decision**: ~~The operator injects `mtls:` block into the authbridge ConfigMap.~~ **Superseded per PR #405 review.** The controller sets a `kagenti.io/mtls-mode` annotation on the pod template. The webhook reads `mTLSMode` from the AgentRuntime CR at pod CREATE time and sets `MTLS_MODE` env var on the authbridge container.
 
-**Schema** (from `authbridge/authlib/config/config.go`):
-```yaml
-mtls:
-  mode: permissive  # or strict
-```
+**Annotation**: `kagenti.io/mtls-mode: permissive` (or `strict` or `disabled`) on pod template.
 
-**Resolved mode behavior**:
+**Env var**: `MTLS_MODE=permissive` (or `strict` or `disabled`) on authbridge container.
+
+**Resolved mode behavior** (unchanged):
 - `permissive`: Inbound uses byte-peek TLS-sniffing (accepts both TLS and plaintext). Outbound uses plaintext.
 - `strict`: Inbound rejects non-TLS connections. Outbound requires TLS.
 
-**Rationale**: The config schema is already defined in authbridge. The operator just needs to populate it based on `AgentRuntime.spec.mTLSMode`.
+**Rationale**: ConfigMap injection was the original approach, but PR #405 removes CR-level fields from the config hash. Using an annotation on the pod template ensures mTLSMode changes trigger rolling restarts independently of the config hash. The webhook already reads AgentRuntime CRs at pod CREATE — adding the env var is a natural extension.
 
-**Alternatives considered**: None — the schema is fixed by the authbridge implementation.
+**Alternatives considered**:
+- ConfigMap injection (original approach) — rejected: ConfigMap is namespace-level, doesn't support per-AgentRuntime mTLSMode.
+- Authbridge watches AgentRuntime CR directly — rejected: bad sidecar design (API server watches, RBAC blast radius, tight coupling).
 
 ## R2: Authbridge SPIFFE Config Schema
 
@@ -32,13 +32,11 @@ spiffe:
 
 **Rationale**: The SPIFFE block is a prerequisite for `mtls:`. The operator already handles this — no changes needed.
 
-## R3: ConfigMap Hash and Rolling Restart
+## R3: Rolling Restart Mechanism (UPDATED)
 
-**Decision**: When `mTLSMode` changes on an AgentRuntime, the ConfigMap hash annotation on the workload's pod template must change, triggering a rolling restart. The existing `kagenti.io/config-hash` annotation already handles this for the 3-layer (now 2-layer) config merge.
+**Decision**: ~~mTLSMode flows through the config hash.~~ **Superseded per PR #405.** The controller sets a `kagenti.io/mtls-mode` annotation on the workload's pod template. When the annotation value changes (e.g., `permissive` → `strict`), Kubernetes detects a pod template change and triggers a rolling restart. This is independent of the platform config hash (`kagenti.io/config-hash`), which now only reflects cluster + namespace defaults.
 
-**Implementation note**: Adding the `mtls:` block to the ConfigMap content changes the hash automatically — no special handling needed beyond ensuring the `mtls:` block is included in the config that gets hashed.
-
-**Rationale**: Reuses existing config-hash mechanism. No new infrastructure.
+**Rationale**: PR #405 removes all CR-level fields from the config hash (2-layer merge: cluster + namespace only). A separate annotation preserves per-AgentRuntime mTLSMode restart semantics without conflating it with platform config.
 
 ## R4: SpiffeFetcher Default Behavior
 

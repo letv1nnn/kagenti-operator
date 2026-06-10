@@ -173,14 +173,14 @@ The controller detects SPIRE availability by checking for the spiffe-helper init
 ### Functional Requirements
 
 - **FR-001**: The system MUST default `mTLSMode` to `permissive` when not explicitly set on an AgentRuntime CR.
-- **FR-002**: The system MUST include an `mtls:` block in the authbridge sidecar ConfigMap when `mTLSMode` is `permissive` or `strict`, with the mode value matching the AgentRuntime field.
-- **FR-003**: The system MUST NOT include an `mtls:` block in the authbridge sidecar ConfigMap when `mTLSMode` is `disabled`.
+- **FR-002**: The controller MUST set a `kagenti.io/mtls-mode` annotation on the workload's pod template with the resolved `mTLSMode` value (`permissive`, `strict`, or `disabled`). The webhook reads this annotation (and/or the AgentRuntime CR directly) at pod CREATE time to configure the authbridge sidecar.
+- **FR-003**: The webhook MUST set the `MTLS_MODE` environment variable on the authbridge sidecar container based on the AgentRuntime's `mTLSMode` value. Authbridge reads this env var at startup to configure its TLS listeners.
 - **FR-004**: The system MUST set an `MTLSReady` condition on AgentRuntime status indicating whether mTLS infrastructure (SPIRE) is available.
 - **FR-005**: The system MUST use `SpiffeFetcher` (mTLS) as the default card fetcher when the controller has access to the SPIRE Workload API socket.
 - **FR-006**: The system MUST fall back to `DefaultFetcher` (plain HTTP) when SPIRE is not configured on the controller pod.
 - **FR-007**: The system MUST record `status.card.transportSecurity` as `mtls` or `http` on AgentRuntime to indicate which transport was used for the card fetch.
 - **FR-008**: The system MUST record `status.card.attestedAgentSpiffeID` on AgentRuntime with the SPIFFE ID extracted from the peer certificate when the card is fetched over mTLS.
-- **FR-009**: The system MUST trigger a rolling restart of the workload when `mTLSMode` changes (via ConfigMap hash change).
+- **FR-009**: The system MUST trigger a rolling restart of the workload when `mTLSMode` changes. The controller sets a `kagenti.io/mtls-mode` annotation on the pod template; when this annotation value changes, Kubernetes triggers a rolling restart. This is independent of the platform config hash.
 - **FR-010**: The system MUST log deprecation warnings at operator startup when legacy JWS signing flags (`--require-a2a-signature`, `--signature-audit-mode`, `--enforce-network-policies`) are set to `true`.
 - **FR-011**: The system MUST default legacy JWS signing flags to `false`.
 - **FR-012**: The system MUST change the `--enable-verified-fetch` flag default to `true` (kill switch retained for one release cycle).
@@ -188,7 +188,7 @@ The controller detects SPIRE availability by checking for the spiffe-helper init
 ### Key Entities
 
 - **AgentRuntime**: Existing CRD extended with mTLS defaults. `spec.mTLSMode` controls transport security. `status.card` holds transport security metadata. `status.conditions` includes `MTLSReady`. All mTLS-related status goes here, NOT on AgentCard.
-- **Authbridge ConfigMap**: Per-namespace ConfigMap consumed by the authbridge sidecar. Operator populates the `mtls:` block based on `mTLSMode`.
+- **Authbridge Sidecar**: Per-pod sidecar container configured by the webhook at pod CREATE time. Reads `MTLS_MODE` env var to configure TLS listeners.
 - **SPIRE**: External dependency providing X.509 SVIDs via the Workload API. Must be deployed for mTLS to function.
 - **spiffe-helper**: Sidecar container that fetches SVIDs from SPIRE and writes PEM files to a shared volume. The authbridge proxy reads these files.
 - **SpiffeFetcher**: Existing component in `internal/agentcard/fetcher.go` that performs mTLS-authenticated card fetches using go-spiffe X509Source directly.
@@ -209,7 +209,7 @@ The controller detects SPIRE availability by checking for the spiffe-helper init
 - The authbridge mTLS implementation in kagenti-extensions (on main) is stable and tested.
 - Each agent workload has exactly one Pod (one-agent-per-pod model), so pod identity equals agent identity (SPIFFE ID).
 - The spiffe-helper sidecar is already injected by the webhook when `mTLSMode` is non-disabled — no changes to injection logic are needed.
-- The authbridge ConfigMap schema supports the `mtls:` block with `mode:` field as documented in the authbridge code.
+- The authbridge sidecar supports an `MTLS_MODE` environment variable to configure TLS listener mode at startup.
 
 ## Repositories Affected
 
@@ -218,8 +218,9 @@ The controller detects SPIRE availability by checking for the spiffe-helper init
 | File | Change |
 |------|--------|
 | `api/v1alpha1/agentruntime_types.go` | Change `mTLSMode` default to `permissive`; add `MTLSReady` condition type |
-| `internal/controller/agentruntime_controller.go` | Generate `mtls:` block in ConfigMap; set `MTLSReady` condition; use SpiffeFetcher by default |
-| `internal/controller/agentruntime_controller_test.go` | Tests for ConfigMap generation, default mTLS, MTLSReady condition |
+| `internal/controller/agentruntime_controller.go` | Set `kagenti.io/mtls-mode` annotation on pod template; set `MTLSReady` condition; use SpiffeFetcher by default |
+| `internal/controller/agentruntime_controller_test.go` | Tests for mTLS annotation, default mTLS, MTLSReady condition |
+| `internal/webhook/injector/pod_mutator.go` | Read `mTLSMode` from AgentRuntime CR; set `MTLS_MODE` env var on authbridge container |
 | `cmd/main.go` | Default `--enable-verified-fetch` to `true`; default signing flags to `false`; add deprecation log warnings |
 | `config/crd/bases/` | Regenerate CRD manifests if type changes |
 

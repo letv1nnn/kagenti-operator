@@ -12,7 +12,7 @@ Agent-to-agent and controller-to-agent communication in kagenti currently runs o
 2. **MTLSReady condition**: New status condition on AgentRuntime showing whether mTLS infrastructure (SPIRE) is available, with actionable error messages when it's not.
 3. **Controller uses mTLS by default**: `--enable-verified-fetch` and `--enable-card-discovery` flags flip to `true`. SpiffeFetcher becomes the default card fetcher.
 4. **JWS signing deprecation**: Legacy signing flags (`--require-a2a-signature`, `--signature-audit-mode`, `--enforce-network-policies`) emit deprecation warnings.
-5. **ConfigMap mtls block**: Operator injects `mtls: mode: <value>` into authbridge ConfigMap based on AgentRuntime spec.
+5. **Annotation-based mTLS delivery**: Controller sets `kagenti.io/mtls-mode` annotation on pod template (triggers restart on change). Webhook reads `mTLSMode` from AgentRuntime CR at pod CREATE and sets `MTLS_MODE` env var on authbridge container.
 
 No breaking changes. Existing deployments without SPIRE get a clear `MTLSReady=False` condition and can opt out with `mTLSMode: disabled`.
 
@@ -21,9 +21,9 @@ No breaking changes. Existing deployments without SPIRE get a clear `MTLSReady=F
 The implementation leverages heavily what's already built:
 
 - **Authbridge** (kagenti-extensions): mTLS is fully implemented across all proxy modes. No changes needed, only verification.
-- **Operator**: The main work is (a) changing the `mTLSMode` kubebuilder default to `permissive`, (b) injecting the `mtls:` block into the authbridge ConfigMap, (c) adding `MTLSReady` condition logic, and (d) flipping flag defaults.
+- **Operator**: The main work is (a) changing the `mTLSMode` kubebuilder default to `permissive`, (b) setting `kagenti.io/mtls-mode` annotation on the pod template, (c) adding `MTLSReady` condition logic, (d) flipping flag defaults, and (e) webhook sets `MTLS_MODE` env var on authbridge container.
 - **SPIRE detection**: The controller checks whether spiffe-helper volume mounts exist in the workload's pod template. If absent while mTLS is enabled, `MTLSReady=False/SPIREUnavailable`.
-- **Config hash**: `resolvedConfig.MTLSMode` is already included in the config hash, so mTLSMode changes trigger rolling restarts automatically.
+- **Rolling restart**: When `mTLSMode` changes, the `kagenti.io/mtls-mode` annotation on the pod template changes, triggering a Kubernetes rolling restart. This is independent of the platform config hash (per PR #405).
 
 Of 24 tasks, 2 are already done (`[DONE]`), 1 is partial (`[PARTIAL]`), and the remaining 21 are new work, mostly focused on the operator side.
 
@@ -57,7 +57,7 @@ Of 24 tasks, 2 are already done (`[DONE]`), 1 is partial (`[PARTIAL]`), and the 
 
 - **Overlap with Istio mTLS work**: [PR #383](https://github.com/kagenti/kagenti-operator/pull/383) (SharedTrust controller, already merged) and [Issue #399](https://github.com/kagenti/kagenti-operator/issues/399) (Istio auto-labeling) introduce Istio-based mTLS at the infrastructure layer. This spec operates at the application layer (SPIRE). Reviewers should verify these don't conflict at the configuration level (e.g., what happens when both SPIRE mTLS and Istio mTLS are active on the same workload).
 
-- **ConfigMap schema contract**: T005 (injecting `mtls:` block) and T020 (verifying authbridge expects this shape) are the critical integration point. If the authbridge config schema doesn't match what the operator generates, mTLS silently fails.
+- **Annotation + env var contract**: T005 (controller sets `kagenti.io/mtls-mode` annotation, webhook sets `MTLS_MODE` env var) and T020 (verifying authbridge reads this env var) are the critical integration point. If authbridge doesn't read `MTLS_MODE`, mTLS mode changes have no effect.
 
 - **MTLSReady condition gating Ready**: T016 proposes that `MTLSReady=False` should affect the overall `Ready` condition. The exact behavior (block Ready entirely vs. add a warning) needs careful design, since it changes the controller's availability semantics.
 
@@ -74,7 +74,7 @@ Of 24 tasks, 2 are already done (`[DONE]`), 1 is partial (`[PARTIAL]`), and the 
 - [ ] Key decisions are justified (especially SPIRE-only vs Istio interaction)
 - [ ] Scope matches the stated boundaries (no Istio, no user certs, no cross-cluster)
 - [ ] Constitution compliance verified (all 5 principles addressed in plan.md)
-- [ ] ConfigMap `mtls:` block schema matches authbridge expectations
+- [ ] Annotation + env var contract matches authbridge expectations
 - [ ] No conflict with existing SharedTrust controller ([PR #383](https://github.com/kagenti/kagenti-operator/pull/383))
 - [ ] Task reconciliation against `main` is accurate ([DONE]/[PARTIAL] markers)
 - [ ] Success criteria are achievable and testable
