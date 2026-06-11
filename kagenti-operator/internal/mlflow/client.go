@@ -158,36 +158,50 @@ func (c *Client) retryBaseDelay() time.Duration {
 	return DefaultRetryBaseDelay
 }
 
-func (c *Client) httpClient() *http.Client {
+func (c *Client) httpClient() (*http.Client, error) {
+	var initErr error
 	c.httpOnce.Do(func() {
 		if c.HTTPClient == nil {
+			transport, err := c.buildTransport()
+			if err != nil {
+				initErr = err
+				return
+			}
 			c.HTTPClient = &http.Client{
 				Timeout:   c.timeout(),
-				Transport: c.buildTransport(),
+				Transport: transport,
 			}
 		}
 	})
-	return c.HTTPClient
+	if initErr != nil {
+		return nil, initErr
+	}
+	if c.HTTPClient == nil {
+		return nil, fmt.Errorf("http client initialization failed")
+	}
+	return c.HTTPClient, nil
 }
 
-func (c *Client) buildTransport() http.RoundTripper {
+func (c *Client) buildTransport() (http.RoundTripper, error) {
 	if c.CAFile == "" {
-		return nil
+		return nil, nil
 	}
 	caPEM, err := os.ReadFile(c.CAFile)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("reading CA file %q: %w", c.CAFile, err)
 	}
 	pool, err := x509.SystemCertPool()
 	if err != nil {
 		pool = x509.NewCertPool()
 	}
-	pool.AppendCertsFromPEM(caPEM)
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("CA file %q contains no valid PEM certificates", c.CAFile)
+	}
 	return &http.Transport{
 		TLSClientConfig: &tls.Config{
 			RootCAs: pool,
 		},
-	}
+	}, nil
 }
 
 func (c *Client) tokenPath() string {
@@ -398,7 +412,12 @@ func (c *Client) doRequest(ctx context.Context, method, path, workspace string, 
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.httpClient().Do(req)
+	httpClient, err := c.httpClient()
+	if err != nil {
+		return nil, fmt.Errorf("initializing HTTP client: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}

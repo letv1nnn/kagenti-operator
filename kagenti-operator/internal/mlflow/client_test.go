@@ -18,8 +18,15 @@ package mlflow
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -434,7 +441,10 @@ func TestRetry_NoRetryOn4xx(t *testing.T) {
 
 func TestBuildTransport_NoCAFile(t *testing.T) {
 	c := &Client{BaseURL: "https://example.com"}
-	transport := c.buildTransport()
+	transport, err := c.buildTransport()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if transport != nil {
 		t.Error("expected nil transport when CAFile is empty")
 	}
@@ -442,31 +452,38 @@ func TestBuildTransport_NoCAFile(t *testing.T) {
 
 func TestBuildTransport_InvalidCAFile(t *testing.T) {
 	c := &Client{BaseURL: "https://example.com", CAFile: "/nonexistent/ca.pem"}
-	transport := c.buildTransport()
-	if transport != nil {
-		t.Error("expected nil transport when CAFile does not exist")
+	_, err := c.buildTransport()
+	if err == nil {
+		t.Fatal("expected error for missing CA file")
+	}
+}
+
+func TestBuildTransport_InvalidPEM(t *testing.T) {
+	caPath := filepath.Join(t.TempDir(), "bad.pem")
+	if err := os.WriteFile(caPath, []byte("not a pem"), 0600); err != nil {
+		t.Fatalf("writing test file: %v", err)
+	}
+
+	c := &Client{BaseURL: "https://example.com", CAFile: caPath}
+	_, err := c.buildTransport()
+	if err == nil {
+		t.Fatal("expected error for invalid PEM content")
 	}
 }
 
 func TestBuildTransport_ValidCAFile(t *testing.T) {
-	// Create a temp PEM file with a dummy CA cert
+	// Generate a self-signed CA certificate for testing
 	caPath := filepath.Join(t.TempDir(), "ca.pem")
-	// Use a self-signed cert PEM (just needs to be parseable)
-	dummyPEM := []byte(`-----BEGIN CERTIFICATE-----
-MIIBkTCB+wIJALRiMLAhBHkfMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnRl
-c3RjYTAeFw0yNDA2MTAxNjAwMDBaFw0yNTA2MTAxNjAwMDBaMBExDzANBgNVBAMM
-BnRlc3RjYTBcMA0GCSqGSIb3DQEBAQUAAwsAMEgCQQC7o96d34FHON3QS39tnWWP
-fm5XO0K5fN5u8S1w7FYQFR18bNLdP3J0u2iAcLGGf3rkUddU2LRBB3qe7YESQQ3
-AgMBAAEwDQYJKoZIhvcNAQELBQADQQBi5xVL+nqUSHmsm15FYkZrJnOXtQj2PT7S
-GgPXqM1T3iA0oBe+n6PBnH7cL9fJcXl9Yl0NWqt8ByPNmNrWJ5R
------END CERTIFICATE-----
-`)
-	if err := os.WriteFile(caPath, dummyPEM, 0600); err != nil {
+	caPEM := generateTestCACert(t)
+	if err := os.WriteFile(caPath, caPEM, 0600); err != nil {
 		t.Fatalf("writing test CA: %v", err)
 	}
 
 	c := &Client{BaseURL: "https://example.com", CAFile: caPath}
-	transport := c.buildTransport()
+	transport, err := c.buildTransport()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if transport == nil {
 		t.Fatal("expected non-nil transport with valid CA file")
 	}
@@ -477,4 +494,25 @@ GgPXqM1T3iA0oBe+n6PBnH7cL9fJcXl9Yl0NWqt8ByPNmNrWJ5R
 	if httpTransport.TLSClientConfig == nil || httpTransport.TLSClientConfig.RootCAs == nil {
 		t.Fatal("expected TLS config with custom RootCAs")
 	}
+}
+
+func generateTestCACert(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating certificate: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 }
