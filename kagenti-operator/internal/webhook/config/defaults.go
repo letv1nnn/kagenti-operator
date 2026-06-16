@@ -5,6 +5,21 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+// DefaultSpiffeHelperConfig is the default helper.conf content for spiffe-helper.
+// Keep in sync with charts/kagenti-operator/values.yaml defaults.spiffe.helperConfig.
+const DefaultSpiffeHelperConfig = `agent_address = "/spiffe-workload-api/spire-agent.sock"
+cmd = ""
+cmd_args = ""
+svid_file_name = "/opt/svid.pem"
+svid_key_file_name = "/opt/svid_key.pem"
+svid_bundle_file_name = "/opt/svid_bundle.pem"
+cert_file_mode = 0644
+key_file_mode = 0640
+jwt_svids = [{jwt_audience="http://keycloak.localtest.me:8080/realms/kagenti", jwt_svid_file_name="/opt/jwt_svid.token"}]
+jwt_svid_file_mode = 0644
+include_federated_domains = true
+`
+
 // CompiledDefaults returns hardcoded defaults used when no config is provided
 func CompiledDefaults() *PlatformConfig {
 	return &PlatformConfig{
@@ -79,8 +94,9 @@ func CompiledDefaults() *PlatformConfig {
 			DefaultScopes: []string{"openid"},
 		},
 		Spiffe: SpiffeConfig{
-			TrustDomain: "cluster.local",
-			SocketPath:  "unix:///spiffe-workload-api/spire-agent.sock",
+			TrustDomain:  "cluster.local",
+			SocketPath:   "unix:///spiffe-workload-api/spire-agent.sock",
+			HelperConfig: DefaultSpiffeHelperConfig,
 		},
 		Observability: ObservabilityConfig{
 			LogLevel:      "info",
