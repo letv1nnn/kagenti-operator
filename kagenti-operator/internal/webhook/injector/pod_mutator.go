@@ -340,7 +340,7 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	// when only enforce-redirect is allowed, fail open when only none is
 	// allowed — the admin controls the list).
 	allowed := currentConfig.Proxy.AllowedEgressEnforcement
-	if len(allowed) > 0 && !stringInSlice(egressEnforcement, allowed) {
+	if !slices.Contains(allowed, egressEnforcement) {
 		mutatorLog.Info("WARN: egressEnforcement value not in platform allowedEgressEnforcement; overriding",
 			"namespace", namespace, "crName", crName,
 			"requested", egressEnforcement, "allowed", allowed,
@@ -1119,15 +1119,6 @@ func containerExists(containers []corev1.Container, name string) bool {
 func volumeExists(volumes []corev1.Volume, name string) bool {
 	for i := range volumes {
 		if volumes[i].Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func stringInSlice(s string, list []string) bool {
-	for _, v := range list {
-		if v == s {
 			return true
 		}
 	}
