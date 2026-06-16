@@ -51,6 +51,14 @@ type ProxyConfig struct {
 	// external TCP egress to. It MUST match the authbridge proxy-sidecar
 	// listener.transparent_proxy_addr (default :8082).
 	TransparentPort int32 `json:"transparentPort" yaml:"transparentPort"`
+
+	// IptablesCmd optionally pins the iptables backend the proxy-init script
+	// uses, injected as the IPTABLES_CMD env var (omitted when empty). Empty
+	// (default) lets the script auto-detect from /proc/modules (iptable_nat
+	// loaded => legacy, as on Kind/kubeadm; absent => nft, as on OpenShift/
+	// ROSA). Set to "iptables" (nft) or "iptables-legacy" to force a backend
+	// where auto-detection is wrong or undesired.
+	IptablesCmd string `json:"iptablesCmd" yaml:"iptablesCmd"`
 }
 
 type ResourcesConfig struct {
