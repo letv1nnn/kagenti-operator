@@ -68,6 +68,8 @@ const (
 	OutboundPortsExcludeAnnotation = "kagenti.io/outbound-ports-exclude"
 	InboundPortsExcludeAnnotation  = "kagenti.io/inbound-ports-exclude"
 
+	sourceNamespaceConfigMap = "namespace-configmap"
+
 	// KagentiTypeLabel is the label key that identifies the workload type
 	KagentiTypeLabel = "kagenti.io/type"
 	// KagentiTypeAgent is the label value that identifies agent workloads
@@ -231,7 +233,7 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	mtlsSource := ""
 	if m := ExtractMTLSMode(nsConfig.AuthBridgeRuntimeYAML); m != "" {
 		mtlsMode = m
-		mtlsSource = "namespace-configmap"
+		mtlsSource = sourceNamespaceConfigMap
 	}
 	if mtlsMode == "" {
 		mtlsMode = MTLSModePermissive
@@ -290,7 +292,7 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	egressEnforcementSource := ""
 	if ee := ExtractEgressEnforcement(nsConfig.AuthBridgeRuntimeYAML); ee != "" {
 		egressEnforcement = ee
-		egressEnforcementSource = "namespace-configmap"
+		egressEnforcementSource = sourceNamespaceConfigMap
 	}
 	if egressEnforcement == "" {
 		egressEnforcement = EgressEnforcementEnforceRedirect
@@ -391,7 +393,7 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	modeSource := ""
 	if m := ExtractMode(nsConfig.AuthBridgeRuntimeYAML); m != "" {
 		authBridgeMode = m
-		modeSource = "namespace-configmap"
+		modeSource = sourceNamespaceConfigMap
 	}
 	if authBridgeMode == "" {
 		if m := annotations[AnnotationAuthBridgeMode]; m != "" {
