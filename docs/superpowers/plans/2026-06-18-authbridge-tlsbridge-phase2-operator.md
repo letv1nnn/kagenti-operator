@@ -4,7 +4,7 @@
 
 **Goal:** Make the AuthBridge TLS bridge work end-to-end on operator-deployed agents — the operator provisions a per-agent cert-manager CA, mounts the signing key into the sidecar and the trust cert + trust env into the agent, and renders the `tls_bridge:` config block — so a real agent's outbound HTTPS is decrypted into the pipeline, gated behind an off-by-default `tlsBridgeMode`.
 
-**Architecture:** A new `tlsBridgeMode: disabled|enabled` field on the `AgentRuntime` CRD, resolved CR→namespace→default exactly like `mtlsMode`. When `enabled` (and feature-gated on, and cert-manager present, and `authBridgeMode ∈ {proxy-sidecar, lite}`), a new per-agent CA reconciler creates a SelfSigned `Issuer` + a CA `Certificate` (`isCA: true`, **no Name Constraints**) → a Secret. The mutating webhook hard-mounts `tls.crt`/`tls.key` into the sidecar (mode `0440`) and `ca.crt` + trust env into the agent, and renders `tls_bridge: {mode: enabled, ca_dir: /etc/authbridge/tls-bridge-ca}` into the per-agent config (consolidated schema, kagenti-extensions#522 — no scope/ca_source/cert-paths). A small companion change in `kagenti-extensions` localhost-binds + redacts the `:9094` session API when bridging is on, since it now carries decrypted bodies.
+**Architecture:** A new `tlsBridgeMode: disabled|enabled` field on the `AgentRuntime` CRD, resolved CR→namespace→default exactly like `mtlsMode`. When `enabled` (and feature-gated on, and cert-manager present, and `authBridgeMode ∈ {proxy-sidecar, lite}`), a new per-agent CA reconciler creates a SelfSigned `Issuer` + a CA `Certificate` (`isCA: true`, **no Name Constraints**) → a Secret. The mutating webhook hard-mounts `tls.crt`/`tls.key` into the sidecar (mode `0440`) and `ca.crt` + trust env into the agent, and renders `tls_bridge: {mode: enabled, ca_dir: /etc/authbridge/tls-bridge-ca}` into the per-agent config (consolidated schema, kagenti-extensions#522 — no scope/ca_source/cert-paths). The `:9094` session-API localhost-bind (it now carries decrypted bodies) already shipped authbridge-side in #522, so the operator PR carries no extensions work; raw-body redaction is a deferred follow-up.
 
 **Tech Stack:** Go 1.x (kagenti-operator, kubebuilder/controller-runtime), cert-manager Go API `github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1` (v1.20.2, already vendored + scheme-registered), `k8s.io/utils/ptr`. Phase-1 AuthBridge code (kagenti-extensions PR #522) is the **prerequisite** — the rendered `tls_bridge:` block is only understood by the post-#522 authbridge image.
 
@@ -55,8 +55,9 @@ All operator paths under `kagenti-operator/kagenti-operator/` unless noted. Veri
 - `cmd/main.go` — register the reconciler (gated).
 - RBAC marker on the new reconciler + `config/rbac/role.yaml` + `charts/kagenti-operator/templates/rbac/role.yaml`.
 
-**kagenti-extensions (small companion):**
-- `authbridge/authlib/config/config.go` + the session-API listener — localhost-bind + raw-body redact when `tls_bridge.enabled`.
+**kagenti-extensions:** none required for this PR. The `:9094` localhost-bind already
+shipped in #522 (`config.Load` rewrites `session_api_addr` to loopback when
+`tls_bridge.mode=enabled`). Raw-body redaction is a deferred follow-up, not a Phase-2 blocker.
 
 **Naming constants (used across tasks — define once in Task 2):**
 - `TLSBridgeModeDisabled = "disabled"`, `TLSBridgeModeEnabled = "enabled"`
@@ -76,7 +77,7 @@ git fetch origin main   # or upstream main, per your remote
 git checkout -b feat/tlsbridge-phase2 origin/main
 ```
 
-(All operator work happens here. The kagenti-extensions `:9094` change in Task 11 is a separate branch in that repo.)
+(All operator work happens here. No kagenti-extensions changes are needed — the `:9094` localhost-bind already landed in #522.)
 
 ---
 
@@ -335,6 +336,16 @@ git commit -s -m "feat(tlsbridge): reject tlsBridgeMode=enabled with envoy-sidec
 - Test: `kagenti-operator/internal/controller/tlsbridge_ca_controller_test.go`
 
 This reconciler watches `AgentRuntime`. When the resolved mode is `enabled` AND the feature gate is on AND cert-manager is present, it ensures (per agent): a namespace SelfSigned `Issuer` (shared, name `authbridge-tls-bridge-selfsigned`) and a CA `Certificate` (`isCA: true`, `secretName: <agent>-tls-bridge-ca`, **no nameConstraints**) owned by the AgentRuntime. cert-manager then issues the Secret (`tls.crt`/`tls.key`/`ca.crt`). The hard pod-mount (Task 7) blocks pod start until that Secret exists — solving the ordering race.
+
+> **Contract with authbridge `FileSource` (kagenti-extensions#522).** The bridge's
+> `NewFileSource` now *validates* the mounted Secret at boot and **fails loud** if the
+> cert is not a CA (`IsCA=false` / missing `KeyUsageCertSign`) or if cert/key don't match.
+> So the `Certificate` below MUST keep `IsCA: true` **and** `Usages` including
+> `cmv1.UsageCertSign` — both are present in the spec below; do not drop them, or the
+> sidecar will refuse to start (which is the intended fail-loud, not a silent tunnel). The
+> ECDSA P-256 key cert-manager issues (SEC1-encoded) is parseable by `FileSource` (it tries
+> PKCS#8 → PKCS#1 → SEC1); RSA would also work. cert-manager issues cert+key together, so
+> the match check passes.
 
 - [ ] **Step 1: Write the failing test** (envtest or fake client — mirror an existing controller test in `internal/controller/`):
 
@@ -717,40 +728,20 @@ git commit -s -m "feat(tlsbridge): gate + wire render/mounts in the mutating web
 
 ---
 
-## Task 11: kagenti-extensions — gate `:9094` when bridging is on
+## Task 11: `:9094` hardening — DONE in #522 (no operator work)
 
-**Files (in the `kagenti-extensions` repo, separate branch `feat/tlsbridge-9094-guard`):**
-- Modify: `authbridge/authlib/config/config.go` and the session-API listener wiring in `cmd/authbridge-proxy/main.go` (or wherever `session_api_addr` is bound).
-- Test: `authbridge/authlib/config/config_test.go`
+**Status: the localhost-bind shipped in PR #522 (`4acd038`), authbridge-side.** When
+`tls_bridge.mode == enabled`, `config.Load()` rewrites `listener.session_api_addr` to
+`127.0.0.1:<port>` (tests: `TestForceLocalhost`, `TestLoad_TLSBridgeHardensSessionAPI`).
+It is **automatic** — the operator renders no session-API config and carries **no work**
+for this. Consequence to document in the E2E + user docs: with bridging on, `:9094` is
+reachable only from inside the pod (kubectl port-forward / abctl still work — they target
+the pod's loopback); **cross-pod scraping of `:9094` stops working by design.**
 
-Decrypted HTTPS bodies (tokens, PII) now flow through the session store, which the unauthenticated `:9094` API exposes. When `tls_bridge.enabled`, force the session API to bind localhost-only and redact raw bodies.
-
-- [ ] **Step 1: Write the failing test** — when `TLSBridge.Enabled`, the effective session-API bind is localhost and raw-body capture is off:
-
-```go
-func TestTLSBridge_HardensSessionAPI(t *testing.T) {
-	// Load a config with tls_bridge.enabled: true and session_api_addr ":9094".
-	// Assert the resolved/effective session API addr is "127.0.0.1:9094" (or the
-	// configured port bound to localhost) and that raw-body capture is disabled.
-}
-```
-
-- [ ] **Step 2: Run — expect FAIL**
-
-Run: `cd authbridge/authlib && go test ./config/ -run TestTLSBridge_HardensSessionAPI -v`
-
-- [ ] **Step 3: Implement** — in the config resolution / session-API setup, when `cfg.TLSBridge != nil && cfg.TLSBridge.Enabled`: rewrite a `0.0.0.0`/empty-host `session_api_addr` to `127.0.0.1:<port>`, and set the session store's raw-body-capture flag off (or route bodies through the existing `redact` package). Follow the existing `:9094` wiring and the `redact` package already in the repo.
-
-- [ ] **Step 4: Run — expect PASS**; full authlib suite green.
-
-- [ ] **Step 5: Commit (in kagenti-extensions)**
-
-```bash
-git add authbridge/authlib/config/ authbridge/cmd/authbridge-proxy/main.go
-git commit -s -m "fix(tlsbridge): localhost-bind + redact :9094 session API when bridging is on"
-```
-
-(This can ship in the Phase-1 PR #522 follow-up or its own small extensions PR; it must land + be tagged BEFORE the operator references it — see Release ordering.)
+**Deferred (future, not this PR):** raw-body *redaction* in the session store. The
+localhost-bind shrinks who can reach the API; redaction (scrubbing tokens/PII from the
+captured decrypted bodies even for an authorized port-forward reader) is a separate
+follow-up tracked with the other Phase-1 hardening items.
 
 ---
 
@@ -785,15 +776,15 @@ git commit -s -m "test(tlsbridge): e2e — operator-provisioned CA decrypts agen
 - `tlsBridgeMode: enabled` + `envoy-sidecar` is **rejected** at admission.
 - Feature gate **off by default**; disabled/gate-off agents are byte-identical to today.
 - Un-bridgeable traffic (pinned client, trust-env-ignoring runtime) safely tunnels; cert-manager-absent → pod Pending (documented), never silent un-bridged egress.
-- `:9094` is localhost-bound + body-redacted whenever bridging is on.
+- `:9094` is localhost-bound whenever bridging is on (already in #522; redaction deferred).
 
 ---
 
 ## Release ordering (multi-repo — MANDATORY)
 
-The operator renders a `tls_bridge:` block only the post-#522 authbridge image understands, and the `:9094` guard (Task 11) is authbridge-side. So:
+The operator renders a `tls_bridge:` block only the post-#522 authbridge image understands (the `:9094` localhost-bind + `FileSource` validation are already in #522). So:
 
-1. **kagenti-extensions**: merge PR #522 (Phase 1) **and** the Task 11 `:9094` guard → tag a new `v0.x.0-alpha.N` authbridge/proxy-init image.
+1. **kagenti-extensions**: merge PR #522 → tag a new `v0.x.0-alpha.N` authbridge/proxy-init image.
 2. **kagenti-operator**: merge this Phase-2 PR → tag `v0.x.0-alpha.M`.
 3. **kagenti**: bump the chart pins (operator image + authbridge sidecar images) to the new tags; this is where it becomes installable. Same operator→extensions→kagenti order as the alpha.9 release.
 
