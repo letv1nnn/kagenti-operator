@@ -67,6 +67,14 @@ func addVolumeMountIfMissing(c *corev1.Container, vm corev1.VolumeMount) {
 func applyTLSBridgeMounts(podSpec *corev1.PodSpec, workloadName string) {
 	secretName := workloadName + agentv1alpha1.TLSBridgeCASecretSuffix
 
+	// The CA Secret is mounted 0440 (group-readable, never world). The sidecar
+	// runs non-root, so it can only read those files if the pod has an fsGroup
+	// that owns the mounted volume. SPIRE deployments get fsGroup via
+	// ensureFSGroup, but the bridge must work without SPIRE too — so set it here
+	// unconditionally. Without this the sidecar fails at boot with
+	// "tls-bridge CA init failed: ... permission denied".
+	ensureFSGroup(podSpec)
+
 	// 1) Secret volume — hard mount, group-readable key (0440).
 	if !volumeExists(podSpec.Volumes, TLSBridgeCAVolumeName) {
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{

@@ -2297,6 +2297,12 @@ func TestInjectAuthBridge_TLSBridge_GateOnAndEnabled_MountsCA(t *testing.T) {
 		t.Errorf("CA volume DefaultMode = %v, want 0440", vol.Secret.DefaultMode)
 	}
 
+	// fsGroup must be set (even without SPIRE) so the non-root sidecar can read
+	// the 0440 CA secret; otherwise the bridge fails at boot with permission denied.
+	if podSpec.SecurityContext == nil || podSpec.SecurityContext.FSGroup == nil {
+		t.Error("expected fsGroup to be set for the non-root sidecar to read the 0440 CA secret")
+	}
+
 	// Sidecar: mounts the CA dir (needs the keypair to mint leaves), but does
 	// NOT get the agent trust env vars.
 	var sidecar, agent *corev1.Container
