@@ -538,18 +538,18 @@ var _ = Describe("AgentRuntime Config", func() {
 			// Deployment match
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "my-deploy-abc123"}},
+					OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "my-deploy-abc123", Controller: ptr.To(true)}},
 				},
 			}
 			Expect(isPodOwnedByWorkload(pod, "my-deploy")).To(BeTrue())
 
 			// No prefix collision
-			pod.OwnerReferences[0].Name = "my-deploy-v2-abc123"
+			pod.OwnerReferences[0] = metav1.OwnerReference{Kind: "ReplicaSet", Name: "my-deploy-v2-abc123", Controller: ptr.To(true)}
 			Expect(isPodOwnedByWorkload(pod, "my-deploy")).To(BeFalse())
 			Expect(isPodOwnedByWorkload(pod, "my-deploy-v2")).To(BeTrue())
 
 			// StatefulSet match
-			pod.OwnerReferences[0] = metav1.OwnerReference{Kind: "StatefulSet", Name: "my-sts"}
+			pod.OwnerReferences[0] = metav1.OwnerReference{Kind: "StatefulSet", Name: "my-sts", Controller: ptr.To(true)}
 			Expect(isPodOwnedByWorkload(pod, "my-sts")).To(BeTrue())
 			Expect(isPodOwnedByWorkload(pod, "other-sts")).To(BeFalse())
 		})

@@ -159,7 +159,7 @@ func TestInjectAuthBridge_NoAgentRuntime_InjectsWithDefaults(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestInjectAuthBridge_SetsServiceAccountName(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestInjectAuthBridge_RespectsExistingServiceAccountName(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestInjectAuthBridge_NoSACreationWhenSpiffeHelperDisabled(t *testing.T) {
 		LabelSpiffeHelperInject: "false", // explicitly opt out of spiffe-helper
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestInjectAuthBridge_Tool_SkipsInjectionByDefault(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeTool,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-tool", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-tool", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestInjectAuthBridge_GlobalOptOut_Agent(t *testing.T) {
 		AuthBridgeInjectLabel: AuthBridgeDisabledValue,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestInjectAuthBridge_Tool_SkippedByGateRegardlessOfOptOut(t *testing.T) {
 		AuthBridgeInjectLabel: AuthBridgeDisabledValue,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-tool", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-tool", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestInjectAuthBridge_DefaultSAOverridden(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestInjectAuthBridge_OutboundPortsExcludeAnnotation(t *testing.T) {
 		OutboundPortsExcludeAnnotation: "11434",
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, annotations)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, annotations)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestInjectAuthBridge_InboundPortsExcludeAnnotation(t *testing.T) {
 		InboundPortsExcludeAnnotation:  "8443,18789",
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, annotations)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, annotations)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestInjectAuthBridge_NilAnnotations(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	injected, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("InjectAuthBridge() returned error: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestInjectAuthBridge_ModeResolution_NamespaceConfigMap(t *testing.T) {
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestInjectAuthBridge_ModeResolution_CRBeatsNamespaceConfigMap(t *testing.T)
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -587,7 +587,7 @@ func TestInjectAuthBridge_ModeResolution_DeprecatedAnnotation(t *testing.T) {
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 	annotations := map[string]string{AnnotationAuthBridgeMode: ModeEnvoySidecar}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, annotations)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, annotations)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -612,7 +612,7 @@ func TestInjectAuthBridge_ModeResolution_CRBeatsAnnotation(t *testing.T) {
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 	annotations := map[string]string{AnnotationAuthBridgeMode: ModeEnvoySidecar}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, annotations)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, annotations)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestInjectAuthBridge_ModeResolution_ClusterDefault(t *testing.T) {
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -666,7 +666,7 @@ func TestInjectAuthBridge_LiteMode_UsesAuthBridgeLiteImage(t *testing.T) {
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -710,7 +710,7 @@ func TestInjectAuthBridge_LiteMode_FromNamespaceConfigMap(t *testing.T) {
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -743,7 +743,7 @@ func TestInjectAuthBridge_ModeResolution_UnrecognizedFallsBackToProxySidecar(t *
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestInjectAuthBridge_WaypointMode_SkipsInjection(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -809,7 +809,7 @@ func TestInjectAuthBridge_ProxySidecar_EgressEnforcement(t *testing.T) {
 	t.Run("always injects proxy-init in enforce-redirect mode", func(t *testing.T) {
 		m := newTestMutator(newAgentRuntimeWithMode("team1", "my-agent", ModeProxySidecar))
 		spec := makePod()
-		if _, err := m.InjectAuthBridge(ctx, spec, "team1", "my-agent", labels, nil); err != nil {
+		if _, err := m.InjectAuthBridge(ctx, spec, "team1", "my-agent", "Deployment", labels, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		ic := findProxyInit(spec)
@@ -837,7 +837,7 @@ func TestInjectAuthBridge_ProxySidecar_EgressEnforcement(t *testing.T) {
 		m := newTestMutator(newAgentRuntimeWithMode("team1", "my-agent", ModeProxySidecar))
 		spec := makePod()
 		spec.InitContainers = []corev1.Container{{Name: ProxyInitContainerName, Image: "preexisting"}}
-		if _, err := m.InjectAuthBridge(ctx, spec, "team1", "my-agent", labels, nil); err != nil {
+		if _, err := m.InjectAuthBridge(ctx, spec, "team1", "my-agent", "Deployment", labels, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		count := 0
@@ -866,7 +866,7 @@ func TestInjectAuthBridge_ProxySidecarMode_InjectsCorrectly(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -955,7 +955,7 @@ func TestInjectAuthBridge_ProxySidecarMode_MountsKeycloakCredentials(t *testing.
 		AnnotationKeycloakClientSecretName: "kagenti-keycloak-client-credentials-abc12345",
 	}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, annotations)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, annotations)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1063,7 +1063,7 @@ func TestInjectAuthBridge_ProxySidecarMode_PortCollision(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1121,7 +1121,7 @@ func TestInjectAuthBridge_ProxySidecarMode_ForwardProxyCollision(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1232,7 +1232,7 @@ func TestInjectAuthBridge_ProxySidecarMode_NoPorts_UsesDefault(t *testing.T) {
 		KagentiTypeLabel: KagentiTypeAgent,
 	}
 
-	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", labels, nil)
+	mutated, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1940,7 +1940,7 @@ func TestInjectAuthBridge_EgressEnforcement_DefaultInjectsProxyInit(t *testing.T
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1962,7 +1962,7 @@ func TestInjectAuthBridge_EgressEnforcement_NoneSkipsProxyInit(t *testing.T) {
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1988,7 +1988,7 @@ func TestInjectAuthBridge_EgressEnforcement_EnforceRedirectInjectsProxyInit(t *t
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2020,7 +2020,7 @@ func TestInjectAuthBridge_EgressEnforcement_NamespaceConfigMapNone(t *testing.T)
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2051,7 +2051,7 @@ func TestInjectAuthBridge_EgressEnforcement_CROverridesNamespace(t *testing.T) {
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2082,7 +2082,7 @@ func TestInjectAuthBridge_EgressEnforcement_UnknownValueFailsClosed(t *testing.T
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2106,7 +2106,7 @@ func TestInjectAuthBridge_EgressEnforcement_EnvoySidecarIgnoresNone(t *testing.T
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2148,7 +2148,7 @@ func TestInjectAuthBridge_EgressEnforcement_PlatformPolicyBlocksNone(t *testing.
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2170,7 +2170,7 @@ func TestInjectAuthBridge_EgressEnforcement_PlatformPolicyAllowsNone(t *testing.
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2192,7 +2192,7 @@ func TestInjectAuthBridge_EgressEnforcement_PlatformPolicyOnlyNone(t *testing.T)
 	}
 	labels := map[string]string{KagentiTypeLabel: KagentiTypeAgent}
 
-	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", labels, nil)
+	_, err := m.InjectAuthBridge(ctx, podSpec, "test-ns", "my-agent", "Deployment", labels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
