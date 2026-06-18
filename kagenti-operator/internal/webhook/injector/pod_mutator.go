@@ -667,22 +667,12 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	}
 	requiredVolumes = overrideAuthBridgeConfigMapInVolumes(requiredVolumes, perAgentCMName)
 
-	// When mtlsMode is non-disabled, render a per-agent envoy-config CM
-	// so the workload's Envoy data plane carries the right TLS blocks.
-	// disabled stays on the namespace-level envoy-config (today's
-	// behavior, no per-agent CM churn).
-	if mtlsMode != MTLSModeDisabled {
-		// ResolveConfig is cheap/idempotent; we clear EnvoyYAML so
-		// RenderEnvoyConfig uses the template path (with mtls TLS
-		// blocks) instead of short-circuiting on the namespace CM.
-		resolvedForEnvoy := ResolveConfig(currentConfig, nsConfig, arOverrides)
-		resolvedForEnvoy.EnvoyYAML = ""
-		envoyCMName, err := m.ensurePerAgentEnvoyConfigMap(ctx, namespace, crName, resolvedForEnvoy)
-		if err != nil {
-			return false, fmt.Errorf("envoy-sidecar per-agent envoy ConfigMap: %w", err)
-		}
-		requiredVolumes = overrideEnvoyConfigMapInVolumes(requiredVolumes, envoyCMName)
+	resolvedForEnvoy := ResolveConfig(currentConfig, nsConfig, arOverrides)
+	envoyCMName, err := m.ensurePerAgentEnvoyConfigMap(ctx, namespace, crName, resolvedForEnvoy)
+	if err != nil {
+		return false, fmt.Errorf("envoy-sidecar per-agent envoy ConfigMap: %w", err)
 	}
+	requiredVolumes = overrideEnvoyConfigMapInVolumes(requiredVolumes, envoyCMName)
 
 	if decision.EnvoyProxy.Inject && !containerExists(podSpec.Containers, EnvoyProxyContainerName) {
 		podSpec.Containers = append(podSpec.Containers, builder.BuildEnvoyProxyContainerWithSpireOption(spireEnabled))
