@@ -31,7 +31,6 @@ type ResolvedConfig struct {
 	KeycloakURL                string
 	KeycloakRealm              string
 	AdminCredentialsSecretName string // Secret name for KEYCLOAK_ADMIN_USERNAME/PASSWORD (default: "keycloak-admin-secret")
-	SpireEnabled               string
 	SpiffeTrustDomain          string
 	PlatformClientIDs          string
 
@@ -48,7 +47,6 @@ type ResolvedConfig struct {
 
 	// Sidecar configs — from namespace CMs (not overridable by AgentRuntime v1alpha1)
 	SpiffeHelperConf    string
-	EnvoyYAML           string // empty = use template
 	AuthproxyRoutesYAML string
 
 	// AuthBridge runtime config — from namespace "authbridge-runtime-config" ConfigMap
@@ -81,7 +79,6 @@ func ResolveConfig(platform *config.PlatformConfig, ns *NamespaceConfig, ar *Age
 		KeycloakURL:                ns.KeycloakURL,
 		KeycloakRealm:              ns.KeycloakRealm,
 		AdminCredentialsSecretName: KeycloakAdminSecretName,
-		SpireEnabled:               ns.SpireEnabled,
 		SpiffeTrustDomain:          platform.Spiffe.TrustDomain,
 		PlatformClientIDs:          ns.PlatformClientIDs,
 		TokenURL:                   ns.TokenURL,
@@ -93,7 +90,6 @@ func ResolveConfig(platform *config.PlatformConfig, ns *NamespaceConfig, ar *Age
 		ClientAuthType:             ns.ClientAuthType,
 		SpiffeIdpAlias:             ns.SpiffeIdpAlias,
 		SpiffeHelperConf:           ns.SpiffeHelperConf,
-		EnvoyYAML:                  ns.EnvoyYAML,
 		AuthproxyRoutesYAML:        ns.AuthproxyRoutesYAML,
 		AuthBridgeRuntimeYAML:      ns.AuthBridgeRuntimeYAML,
 	}
