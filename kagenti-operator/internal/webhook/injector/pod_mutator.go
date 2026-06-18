@@ -509,21 +509,13 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 			proxyImage = builder.cfg.Images.AuthBridgeLite
 		}
 
-		// TLS bridge gate: on only when BOTH the cluster feature gate and the
-		// resolved per-workload mode are enabled. We are already inside the
+		// TLS bridge: engaged purely by the resolved per-workload mode (like
+		// mtlsMode — there is no cluster feature gate). We are already inside the
 		// proxy-sidecar / lite branch — the only shapes that host the Go forward
-		// proxy — so no further authBridgeMode check is needed. gatedTLSBridgeMode
-		// is what we render into the per-agent ConfigMap: it stays "disabled"
-		// (so the config block is omitted) unless the gate truly opens.
-		tlsBridgeOn := currentGates.TLSBridge && tlsBridgeMode == agentv1alpha1.TLSBridgeModeEnabled
-		gatedTLSBridgeMode := agentv1alpha1.TLSBridgeModeDisabled
-		if tlsBridgeOn {
-			gatedTLSBridgeMode = agentv1alpha1.TLSBridgeModeEnabled
-		}
-		if tlsBridgeMode == agentv1alpha1.TLSBridgeModeEnabled && !currentGates.TLSBridge {
-			mutatorLog.Info("tlsBridgeMode=enabled requested but TLSBridge feature gate is off — not bridging",
-				"namespace", namespace, "crName", crName)
-		}
+		// proxy — so no further authBridgeMode check is needed. tlsBridgeMode
+		// ("disabled" omits the config block, "enabled" renders it + mounts the CA)
+		// is passed straight to the per-agent ConfigMap renderer below.
+		tlsBridgeOn := tlsBridgeMode == agentv1alpha1.TLSBridgeModeEnabled
 
 		// Collect all ports in use across all containers in the pod.
 		usedPorts := map[int32]bool{}
@@ -605,7 +597,7 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 				"reverse_proxy_backend": fmt.Sprintf("http://127.0.0.1:%d", newAgentPort),
 				"forward_proxy_addr":    fmt.Sprintf(":%d", forwardProxyPort),
 			},
-			mtlsMode, allowedAudiences, gatedTLSBridgeMode)
+			mtlsMode, allowedAudiences, tlsBridgeMode)
 		if err != nil {
 			return false, fmt.Errorf("proxy-sidecar per-agent ConfigMap: %w", err)
 		}

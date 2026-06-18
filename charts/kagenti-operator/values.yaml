@@ -201,12 +201,6 @@ featureGates:
   # kagenti.io/skills annotation from target workloads and populates
   # status.linkedSkills. Default false.
   skillDiscovery: false
-  # tlsBridge controls AuthBridge's outbound TLS bridge (decrypt agent egress
-  # HTTPS into the pipeline). It is the cluster-wide kill switch; a workload
-  # also needs spec.tlsBridgeMode=enabled (or the namespace default) and
-  # authBridgeMode proxy-sidecar/lite. Requires cert-manager. Default false —
-  # an L7 interception feature is opt-in.
-  tlsBridge: false
 
 # Platform defaults for AuthBridge sidecar injection.
 # These are the lowest-priority layer — overridden by feature gates,

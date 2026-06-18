@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	agentv1alpha1 "github.com/kagenti/operator/api/v1alpha1"
-	"github.com/kagenti/operator/internal/webhook/config"
 )
 
 func tlsBridgeScheme(t *testing.T) *runtime.Scheme {
@@ -27,10 +26,6 @@ func tlsBridgeScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-func gatesOn() func() *config.FeatureGates {
-	return func() *config.FeatureGates { return &config.FeatureGates{TLSBridge: true} }
-}
-
 func TestTLSBridgeCAReconciler_CreatesIssuerAndCert(t *testing.T) {
 	scheme := tlsBridgeScheme(t)
 	// CR name differs from the target workload name on purpose: the Secret must
@@ -43,7 +38,7 @@ func TestTLSBridgeCAReconciler_CreatesIssuerAndCert(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ar).Build()
-	r := &TLSBridgeCAReconciler{Client: c, Scheme: scheme, GetFeatureGates: gatesOn()}
+	r := &TLSBridgeCAReconciler{Client: c, Scheme: scheme}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "myagent-runtime", Namespace: "team1"},
@@ -83,35 +78,21 @@ func TestTLSBridgeCAReconciler_CreatesIssuerAndCert(t *testing.T) {
 	}
 }
 
-func TestTLSBridgeCAReconciler_DisabledAndGateOff(t *testing.T) {
+func TestTLSBridgeCAReconciler_Disabled(t *testing.T) {
 	scheme := tlsBridgeScheme(t)
 	certName := types.NamespacedName{Name: "off-tls-bridge-ca", Namespace: "team1"}
 
-	// Disabled agent → no Certificate.
+	// tlsBridgeMode disabled (the default) → no Certificate provisioned.
 	off := &agentv1alpha1.AgentRuntime{
 		ObjectMeta: metav1.ObjectMeta{Name: "off", Namespace: "team1"},
 		Spec:       agentv1alpha1.AgentRuntimeSpec{TLSBridgeMode: agentv1alpha1.TLSBridgeModeDisabled},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(off).Build()
-	r := &TLSBridgeCAReconciler{Client: c, Scheme: scheme, GetFeatureGates: gatesOn()}
+	r := &TLSBridgeCAReconciler{Client: c, Scheme: scheme}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "off", Namespace: "team1"}}); err != nil {
 		t.Fatalf("reconcile (disabled): %v", err)
 	}
 	if err := c.Get(context.Background(), certName, &cmv1.Certificate{}); err == nil {
 		t.Error("disabled agent must not get a Certificate")
-	}
-
-	// Feature gate off → no provisioning even when enabled.
-	on := &agentv1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "off", Namespace: "team1"},
-		Spec:       agentv1alpha1.AgentRuntimeSpec{TLSBridgeMode: agentv1alpha1.TLSBridgeModeEnabled},
-	}
-	c2 := fake.NewClientBuilder().WithScheme(scheme).WithObjects(on).Build()
-	r2 := &TLSBridgeCAReconciler{Client: c2, Scheme: scheme, GetFeatureGates: func() *config.FeatureGates { return &config.FeatureGates{TLSBridge: false} }}
-	if _, err := r2.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "off", Namespace: "team1"}}); err != nil {
-		t.Fatalf("reconcile (gate off): %v", err)
-	}
-	if err := c2.Get(context.Background(), certName, &cmv1.Certificate{}); err == nil {
-		t.Error("gate-off must not provision a Certificate")
 	}
 }

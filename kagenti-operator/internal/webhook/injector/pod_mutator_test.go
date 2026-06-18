@@ -2235,14 +2235,6 @@ func TestEnsurePerAgentConfigMap_TLSBridgeBlock(t *testing.T) {
 	}
 }
 
-// tlsBridgeGatesOn returns the default feature gates with the TLSBridge gate
-// flipped on, for tests that exercise the bridge mutation path.
-func tlsBridgeGatesOn() *config.FeatureGates {
-	g := config.DefaultFeatureGates()
-	g.TLSBridge = true
-	return g
-}
-
 // findVolume returns the named volume from the pod spec, or nil.
 func findVolume(podSpec *corev1.PodSpec, name string) *corev1.Volume {
 	for i := range podSpec.Volumes {
@@ -2253,14 +2245,13 @@ func findVolume(podSpec *corev1.PodSpec, name string) *corev1.Volume {
 	return nil
 }
 
-func TestInjectAuthBridge_TLSBridge_GateOnAndEnabled_MountsCA(t *testing.T) {
-	// Feature gate ON + tlsBridgeMode=enabled in proxy-sidecar mode → the
-	// per-agent CA Secret is mounted into both sidecar and agent, and the
-	// agent's trust env vars point at the mounted ca.crt.
+func TestInjectAuthBridge_TLSBridge_Enabled_MountsCA(t *testing.T) {
+	// tlsBridgeMode=enabled in proxy-sidecar mode → the FULL keypair Secret is
+	// mounted into the sidecar only; the agent gets a ca.crt-only volume + trust
+	// env. No cluster feature gate is involved (per-agent field only, like mtls).
 	rt := newAgentRuntimeWithMode("team1", "my-agent", ModeProxySidecar)
 	rt.Spec.TLSBridgeMode = agentv1alpha1.TLSBridgeModeEnabled
 	m := newTestMutator(rt)
-	m.GetFeatureGates = tlsBridgeGatesOn
 	ctx := context.Background()
 
 	podSpec := &corev1.PodSpec{
@@ -2354,12 +2345,12 @@ func TestInjectAuthBridge_TLSBridge_GateOnAndEnabled_MountsCA(t *testing.T) {
 	}
 }
 
-func TestInjectAuthBridge_TLSBridge_GateOffButEnabled_NoMount(t *testing.T) {
-	// tlsBridgeMode=enabled but the cluster TLSBridge gate is OFF → no CA
-	// volume, no trust env. The bridge must not engage without the operator gate.
+func TestInjectAuthBridge_TLSBridge_Disabled_NoMount(t *testing.T) {
+	// Default tlsBridgeMode (disabled / unset) → no CA volume, no trust env.
+	// The bridge is off unless the agent explicitly opts in.
 	rt := newAgentRuntimeWithMode("team1", "my-agent", ModeProxySidecar)
-	rt.Spec.TLSBridgeMode = agentv1alpha1.TLSBridgeModeEnabled
-	m := newTestMutator(rt) // default gates: TLSBridge off
+	// rt.Spec.TLSBridgeMode left unset (defaults to disabled)
+	m := newTestMutator(rt)
 	ctx := context.Background()
 
 	podSpec := &corev1.PodSpec{
@@ -2375,7 +2366,7 @@ func TestInjectAuthBridge_TLSBridge_GateOffButEnabled_NoMount(t *testing.T) {
 	}
 
 	if findVolume(podSpec, TLSBridgeCAVolumeName) != nil {
-		t.Error("CA volume must not be injected when the TLSBridge gate is off")
+		t.Error("CA volume must not be injected when tlsBridgeMode is disabled")
 	}
 	for i := range podSpec.Containers {
 		if podSpec.Containers[i].Name != "agent" {
@@ -2383,7 +2374,7 @@ func TestInjectAuthBridge_TLSBridge_GateOffButEnabled_NoMount(t *testing.T) {
 		}
 		for _, env := range tlsBridgeTrustEnvVars {
 			if envValue(&podSpec.Containers[i], env) != "" {
-				t.Errorf("agent trust env %s must not be set when gate is off", env)
+				t.Errorf("agent trust env %s must not be set when disabled", env)
 			}
 		}
 	}
@@ -2398,7 +2389,6 @@ func TestInjectAuthBridge_TLSBridge_NoSPIRE_NoForcedFSGroup(t *testing.T) {
 	rt.Spec.TLSBridgeMode = agentv1alpha1.TLSBridgeModeEnabled
 	rt.Spec.MTLSMode = MTLSModeDisabled
 	m := newTestMutator(rt)
-	m.GetFeatureGates = tlsBridgeGatesOn
 	ctx := context.Background()
 
 	podSpec := &corev1.PodSpec{

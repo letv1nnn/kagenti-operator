@@ -735,9 +735,8 @@ func main() {
 			os.Exit(1)
 		}
 		if err = (&controller.TLSBridgeCAReconciler{
-			Client:          mgr.GetClient(),
-			Scheme:          mgr.GetScheme(),
-			GetFeatureGates: featureGateLoader.Get,
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "TLSBridgeCA")
 			os.Exit(1)

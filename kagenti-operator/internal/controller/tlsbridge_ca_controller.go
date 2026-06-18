@@ -14,7 +14,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	agentv1alpha1 "github.com/kagenti/operator/api/v1alpha1"
-	"github.com/kagenti/operator/internal/webhook/config"
 )
 
 // tlsBridgeSelfSignedIssuer is the per-namespace SelfSigned issuer that
@@ -28,24 +27,21 @@ const tlsBridgeSelfSignedIssuer = "authbridge-tls-bridge-selfsigned"
 // +kubebuilder:rbac:groups=cert-manager.io,resources=issuers,verbs=get;list;watch;create;update;patch;delete
 
 // TLSBridgeCAReconciler provisions the per-agent cert-manager CA that backs the
-// AuthBridge TLS bridge. For an AgentRuntime with spec.tlsBridgeMode=enabled
-// (and the TLSBridge feature gate on), it ensures a namespace SelfSigned Issuer
-// and a CA Certificate (isCA, cert-sign, NO name constraints) whose Secret the
-// webhook hard-mounts into the sidecar. cert-manager issues the Secret; the hard
-// mount blocks pod start until it exists, which solves the startup ordering race.
+// AuthBridge TLS bridge. For an AgentRuntime with spec.tlsBridgeMode=enabled it
+// ensures a namespace SelfSigned Issuer and a CA Certificate (isCA, cert-sign,
+// NO name constraints) whose Secret the webhook hard-mounts into the sidecar.
+// cert-manager issues the Secret; the hard mount blocks pod start until it
+// exists, which solves the startup ordering race.
 //
-// Enablement is keyed on the CR field (explicit per-agent opt-in for an L7
-// interception feature) — namespace-level default-on does not auto-provision a CA.
+// Enablement is keyed solely on the per-agent CR field (like mtlsMode — no
+// cluster feature gate). The controller is only registered when cert-manager
+// CRDs are present (see cmd/main.go).
 type TLSBridgeCAReconciler struct {
 	client.Client
-	Scheme          *runtime.Scheme
-	GetFeatureGates func() *config.FeatureGates
+	Scheme *runtime.Scheme
 }
 
 func (r *TLSBridgeCAReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	if r.GetFeatureGates == nil || !r.GetFeatureGates().TLSBridge {
-		return ctrl.Result{}, nil
-	}
 	ar := &agentv1alpha1.AgentRuntime{}
 	if err := r.Get(ctx, req.NamespacedName, ar); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
