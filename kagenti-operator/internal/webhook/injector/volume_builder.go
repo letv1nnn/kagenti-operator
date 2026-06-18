@@ -51,38 +51,54 @@ func addVolumeMountIfMissing(c *corev1.Container, vm corev1.VolumeMount) {
 
 // applyTLSBridgeMounts wires the per-agent CA that backs the AuthBridge TLS
 // bridge into the pod. cert-manager publishes the CA keypair into the Secret
-// <workloadName>-tls-bridge-ca (see TLSBridgeCAReconciler); this function:
-//   - adds a Secret-backed volume, hard (NOT Optional) so the kubelet blocks
-//     pod start until cert-manager has issued the Secret — this is what closes
-//     the startup ordering race between the controller and the pod — with the
-//     key mode 0440 (group-readable, never world-readable)
-//   - mounts it read-only into the authbridge-proxy sidecar, which reads
-//     ca.crt + tls.key from TLSBridgeCAMountPath to forge per-origin leaves
-//   - mounts ca.crt (via the same volume) read-only into every agent container
-//     and points the common CA-bundle env vars at it, so the agent's TLS
-//     clients accept the bridge's forged certificates
+// <workloadName>-tls-bridge-ca (see TLSBridgeCAReconciler). The CA has NO Name
+// Constraints, so its private key must stay confined to the sidecar — anything
+// holding tls.key could forge a cert for any host. This function therefore uses
+// TWO volumes from the same Secret:
+//
+//   - keypair volume (tls.crt + tls.key + ca.crt), mounted ONLY into the
+//     authbridge sidecar, which reads tls.crt + tls.key to mint per-origin
+//     leaves. The agent container never mounts it.
+//   - ca.crt-only volume (Secret items: ca.crt), mounted into every agent
+//     container, with the common CA-bundle env vars pointed at it so the agent
+//     trusts the minted leaves — without ever seeing the private key.
+//
+// Both are hard mounts (NOT Optional), so the kubelet blocks pod start until
+// cert-manager has issued the Secret — closing the controller↔pod startup race.
+//
+// Mode is 0444 on both. The sidecar runs non-root (Proxy.UID, gid != 0), so a
+// root-owned 0440 file would be unreadable without forcing a fixed pod fsGroup —
+// and a fixed fsGroup (we use 0) is rejected by OpenShift restricted-v2 SCC,
+// whose supplemental-group range is namespace-assigned. 0444 lets the non-root
+// sidecar read its key with no fsGroup at all; the key is still confined to the
+// sidecar container (never mounted into the agent), and ca.crt is a public cert.
 //
 // workloadName MUST equal the AgentRuntime's spec.targetRef.name (== crName in
 // the webhook) so the Secret name matches what the reconciler provisions.
 func applyTLSBridgeMounts(podSpec *corev1.PodSpec, workloadName string) {
 	secretName := workloadName + agentv1alpha1.TLSBridgeCASecretSuffix
 
-	// The CA Secret is mounted 0440 (group-readable, never world). The sidecar
-	// runs non-root, so it can only read those files if the pod has an fsGroup
-	// that owns the mounted volume. SPIRE deployments get fsGroup via
-	// ensureFSGroup, but the bridge must work without SPIRE too — so set it here
-	// unconditionally. Without this the sidecar fails at boot with
-	// "tls-bridge CA init failed: ... permission denied".
-	ensureFSGroup(podSpec)
-
-	// 1) Secret volume — hard mount, group-readable key (0440).
+	// Sidecar keypair volume (full Secret) + agent ca.crt-only volume.
 	if !volumeExists(podSpec.Volumes, TLSBridgeCAVolumeName) {
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 			Name: TLSBridgeCAVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  secretName,
-					DefaultMode: ptr.To(int32(0o440)),
+					DefaultMode: ptr.To(int32(0o444)),
+				},
+			},
+		})
+	}
+	if !volumeExists(podSpec.Volumes, TLSBridgeCACertVolumeName) {
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: TLSBridgeCACertVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  secretName,
+					DefaultMode: ptr.To(int32(0o444)),
+					// Project ONLY ca.crt — tls.key/tls.crt never reach the agent.
+					Items: []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
 				},
 			},
 		})
@@ -91,16 +107,21 @@ func applyTLSBridgeMounts(podSpec *corev1.PodSpec, workloadName string) {
 	caCrtPath := TLSBridgeCAMountPath + "/ca.crt"
 	for i := range podSpec.Containers {
 		c := &podSpec.Containers[i]
+		if c.Name == AuthBridgeProxyContainerName {
+			// Sidecar: full keypair (reads tls.crt + tls.key to mint leaves).
+			addVolumeMountIfMissing(c, corev1.VolumeMount{
+				Name:      TLSBridgeCAVolumeName,
+				MountPath: TLSBridgeCAMountPath,
+				ReadOnly:  true,
+			})
+			continue
+		}
+		// Agent containers: ca.crt only + trust env vars pointing at it.
 		addVolumeMountIfMissing(c, corev1.VolumeMount{
-			Name:      TLSBridgeCAVolumeName,
+			Name:      TLSBridgeCACertVolumeName,
 			MountPath: TLSBridgeCAMountPath,
 			ReadOnly:  true,
 		})
-		// The sidecar needs the full keypair (ca.crt + tls.key) to mint
-		// leaves; agent containers only need to trust ca.crt.
-		if c.Name == AuthBridgeProxyContainerName {
-			continue
-		}
 		for _, env := range tlsBridgeTrustEnvVars {
 			setOrAddEnv(c, env, caCrtPath)
 		}

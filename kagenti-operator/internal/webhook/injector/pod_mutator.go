@@ -721,6 +721,18 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	// authbridge + bundled spiffe-helper. proxy-init is a separate
 	// init container. spiffe-helper starts conditionally on SPIRE_ENABLED.
 
+	// The TLS bridge lives only in the Go forward proxy (proxy-sidecar / lite).
+	// The validating webhook rejects a CR that sets BOTH authBridgeMode=envoy-sidecar
+	// and tlsBridgeMode=enabled, but tlsBridgeMode can also resolve from the
+	// namespace default while the effective mode is envoy-sidecar — that path
+	// reaches here and the bridge silently does nothing. Warn loudly, mirroring
+	// the gate-off log in the proxy-sidecar branch.
+	if tlsBridgeMode == agentv1alpha1.TLSBridgeModeEnabled {
+		mutatorLog.Info("WARN: tlsBridgeMode=enabled has no effect under authBridgeMode=envoy-sidecar "+
+			"(the TLS bridge runs only in the proxy-sidecar/lite forward proxy); ignoring",
+			"namespace", namespace, "crName", crName, "tlsBridgeSource", tlsBridgeSource)
+	}
+
 	// envoy-sidecar threads the resolved mtlsMode through to the per-agent
 	// authbridge-config CM (so the Provider's spiffe block + any future
 	// authbridge-side mTLS knobs reflect the CR's posture) AND renders a

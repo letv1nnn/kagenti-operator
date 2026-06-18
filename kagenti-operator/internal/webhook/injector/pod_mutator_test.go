@@ -2293,14 +2293,23 @@ func TestInjectAuthBridge_TLSBridge_GateOnAndEnabled_MountsCA(t *testing.T) {
 	if vol.Secret.Optional != nil && *vol.Secret.Optional {
 		t.Error("CA volume must be a HARD mount (Optional unset/false) to gate pod start")
 	}
-	if vol.Secret.DefaultMode == nil || *vol.Secret.DefaultMode != 0o440 {
-		t.Errorf("CA volume DefaultMode = %v, want 0440", vol.Secret.DefaultMode)
+	if vol.Secret.DefaultMode == nil || *vol.Secret.DefaultMode != 0o444 {
+		t.Errorf("keypair DefaultMode = %v, want 0444", vol.Secret.DefaultMode)
+	}
+	if len(vol.Secret.Items) != 0 {
+		t.Errorf("keypair volume must project the full Secret (no Items), got %v", vol.Secret.Items)
 	}
 
-	// fsGroup must be set (even without SPIRE) so the non-root sidecar can read
-	// the 0440 CA secret; otherwise the bridge fails at boot with permission denied.
-	if podSpec.SecurityContext == nil || podSpec.SecurityContext.FSGroup == nil {
-		t.Error("expected fsGroup to be set for the non-root sidecar to read the 0440 CA secret")
+	// (fsGroup may be set here by the SPIRE path, which is on by default in this
+	// test; the bridge's own no-fsGroup behavior is covered by the SPIRE-off test.)
+
+	// ca.crt-only volume: same Secret, projects ONLY ca.crt (no private key).
+	caCert := findVolume(podSpec, TLSBridgeCACertVolumeName)
+	if caCert == nil || caCert.Secret == nil {
+		t.Fatalf("expected Secret-backed %q volume", TLSBridgeCACertVolumeName)
+	}
+	if len(caCert.Secret.Items) != 1 || caCert.Secret.Items[0].Key != "ca.crt" {
+		t.Errorf("ca.crt volume must project only ca.crt, got Items=%v", caCert.Secret.Items)
 	}
 
 	// Sidecar: mounts the CA dir (needs the keypair to mint leaves), but does
@@ -2326,12 +2335,16 @@ func TestInjectAuthBridge_TLSBridge_GateOnAndEnabled_MountsCA(t *testing.T) {
 		}
 	}
 
-	// Agent: mounts the CA dir and has every trust env var pointing at ca.crt.
+	// Agent: mounts ONLY the ca.crt volume (never the keypair — no private key
+	// exposure) and has every trust env var pointing at ca.crt.
 	if agent == nil {
 		t.Fatal("agent container not found")
 	}
-	if !hasMount(agent, TLSBridgeCAVolumeName, TLSBridgeCAMountPath) {
-		t.Errorf("agent missing CA mount at %s", TLSBridgeCAMountPath)
+	if hasMount(agent, TLSBridgeCAVolumeName, TLSBridgeCAMountPath) {
+		t.Error("agent must NOT mount the keypair volume (would expose the CA private key)")
+	}
+	if !hasMount(agent, TLSBridgeCACertVolumeName, TLSBridgeCAMountPath) {
+		t.Errorf("agent missing ca.crt mount at %s", TLSBridgeCAMountPath)
 	}
 	wantCA := TLSBridgeCAMountPath + "/ca.crt"
 	for _, env := range tlsBridgeTrustEnvVars {
@@ -2373,6 +2386,45 @@ func TestInjectAuthBridge_TLSBridge_GateOffButEnabled_NoMount(t *testing.T) {
 				t.Errorf("agent trust env %s must not be set when gate is off", env)
 			}
 		}
+	}
+}
+
+func TestInjectAuthBridge_TLSBridge_NoSPIRE_NoForcedFSGroup(t *testing.T) {
+	// With SPIRE off (spiffe-helper disabled + mTLS disabled) the bridge must
+	// still mount its CA, and must NOT force a fixed fsGroup — the keypair is
+	// 0444 so the non-root sidecar reads it without one (OpenShift restricted-v2
+	// SCC would reject a fixed fsGroup=0).
+	rt := newAgentRuntimeWithMode("team1", "my-agent", ModeProxySidecar)
+	rt.Spec.TLSBridgeMode = agentv1alpha1.TLSBridgeModeEnabled
+	rt.Spec.MTLSMode = MTLSModeDisabled
+	m := newTestMutator(rt)
+	m.GetFeatureGates = tlsBridgeGatesOn
+	ctx := context.Background()
+
+	podSpec := &corev1.PodSpec{
+		ServiceAccountName: "my-agent",
+		Containers: []corev1.Container{
+			{Name: "agent", Image: "my-agent:latest", Ports: []corev1.ContainerPort{{ContainerPort: 8000}}},
+		},
+	}
+	labels := map[string]string{
+		KagentiTypeLabel:        KagentiTypeAgent,
+		LabelSpiffeHelperInject: "false", // SPIRE off
+	}
+
+	if _, err := m.InjectAuthBridge(ctx, podSpec, "team1", "my-agent", "Deployment", labels, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if podSpec.SecurityContext != nil && podSpec.SecurityContext.FSGroup != nil {
+		t.Errorf("with SPIRE off the bridge must not force fsGroup, got %d", *podSpec.SecurityContext.FSGroup)
+	}
+	kp := findVolume(podSpec, TLSBridgeCAVolumeName)
+	if kp == nil || kp.Secret == nil {
+		t.Fatalf("expected keypair volume %q to be mounted even without SPIRE", TLSBridgeCAVolumeName)
+	}
+	if kp.Secret.DefaultMode == nil || *kp.Secret.DefaultMode != 0o444 {
+		t.Errorf("keypair DefaultMode = %v, want 0444 (readable by non-root sidecar without fsGroup)", kp.Secret.DefaultMode)
 	}
 }
 
