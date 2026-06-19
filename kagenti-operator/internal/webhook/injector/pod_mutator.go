@@ -367,15 +367,14 @@ func (m *PodMutator) InjectAuthBridge(ctx context.Context, podSpec *corev1.PodSp
 	// ========================================
 	//
 	// tlsBridgeMode controls whether the Go forward proxy terminates and
-	// re-originates the agent's outbound TLS (the "TLS bridge"). It is gated
-	// twice: the cluster operator must turn on the TLSBridge feature gate AND
-	// the workload (or its namespace) must opt in with tlsBridgeMode=enabled.
-	// The bridge only exists in the proxy-sidecar / lite shapes (the Go forward
-	// proxy); the AgentRuntime validating webhook rejects enabled+envoy-sidecar
-	// upstream of pod admission, so here we only resolve the value and let the
-	// proxy-sidecar branch act on it. Resolution chain mirrors mtlsMode: an
-	// explicit CR value pins; the namespace ConfigMap is the fallback; the
-	// default is "disabled".
+	// re-originates the agent's outbound TLS (the "TLS bridge"). Like mtlsMode,
+	// it is a plain per-workload field (no cluster feature gate): the workload
+	// (or its namespace) opts in with tlsBridgeMode=enabled. The bridge only
+	// exists in the proxy-sidecar / lite shapes (the Go forward proxy); the
+	// AgentRuntime validating webhook rejects enabled+envoy-sidecar upstream of
+	// pod admission, so here we only resolve the value and let the proxy-sidecar
+	// branch act on it. Resolution chain mirrors mtlsMode: an explicit CR value
+	// pins; the namespace ConfigMap is the fallback; the default is "disabled".
 	tlsBridgeMode := agentv1alpha1.TLSBridgeModeDisabled
 	tlsBridgeSource := "default"
 	if arOverrides != nil && arOverrides.TLSBridgeMode != nil {
@@ -1070,8 +1069,8 @@ func (m *PodMutator) ensurePerAgentConfigMap(
 	}
 
 	// TLS bridge block. Rendered only when the caller decided bridging is on
-	// (gate + mode==enabled + proxy-sidecar/lite — see the mutate path). ca_dir
-	// is the mounted cert-manager Secret dir (tls.crt/tls.key/ca.crt). Scrubbed
+	// (mode==enabled + proxy-sidecar/lite — see the mutate path). ca_dir is the
+	// mounted cert-manager Secret dir (tls.crt/tls.key/ca.crt). Scrubbed
 	// otherwise so toggling off doesn't leak a stale block from the base YAML.
 	if tlsBridgeMode == agentv1alpha1.TLSBridgeModeEnabled {
 		cfg["tls_bridge"] = map[string]interface{}{
