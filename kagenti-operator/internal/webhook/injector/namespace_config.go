@@ -42,7 +42,6 @@ type NamespaceConfig struct {
 	// From "authbridge-config" ConfigMap
 	KeycloakURL           string
 	KeycloakRealm         string
-	SpireEnabled          string
 	PlatformClientIDs     string
 	TokenURL              string
 	Issuer                string
@@ -55,9 +54,6 @@ type NamespaceConfig struct {
 
 	// From "spiffe-helper-config" ConfigMap
 	SpiffeHelperConf string // raw helper.conf content
-
-	// From "envoy-config" ConfigMap
-	EnvoyYAML string // raw envoy.yaml content
 
 	// From "authproxy-routes" ConfigMap
 	AuthproxyRoutesYAML string // raw routes.yaml content
@@ -78,7 +74,6 @@ func ReadNamespaceConfig(ctx context.Context, c client.Reader, namespace string)
 	} else {
 		cfg.KeycloakURL = cm.Data["KEYCLOAK_URL"]
 		cfg.KeycloakRealm = cm.Data["KEYCLOAK_REALM"]
-		cfg.SpireEnabled = cm.Data["SPIRE_ENABLED"]
 		cfg.PlatformClientIDs = cm.Data["PLATFORM_CLIENT_IDS"]
 		cfg.TokenURL = cm.Data["TOKEN_URL"]
 		cfg.Issuer = cm.Data["ISSUER"]
@@ -99,13 +94,6 @@ func ReadNamespaceConfig(ctx context.Context, c client.Reader, namespace string)
 		nsConfigLog.V(1).Info("ConfigMap not found", "name", SpiffeHelperConfigMapName, "namespace", namespace, "error", err)
 	} else {
 		cfg.SpiffeHelperConf = cm.Data["helper.conf"]
-	}
-
-	// Read "envoy-config" ConfigMap
-	if cm, err := getConfigMap(ctx, c, namespace, EnvoyConfigMapName); err != nil {
-		nsConfigLog.V(1).Info("ConfigMap not found", "name", EnvoyConfigMapName, "namespace", namespace, "error", err)
-	} else {
-		cfg.EnvoyYAML = cm.Data["envoy.yaml"]
 	}
 
 	// Read "authproxy-routes" ConfigMap
