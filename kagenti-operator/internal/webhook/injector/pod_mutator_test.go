@@ -1403,7 +1403,7 @@ pipeline:
 `
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
-ModeEnvoySidecar, baseYAML, &NamespaceConfig{}, nil, "", "", false)
+		ModeEnvoySidecar, baseYAML, &NamespaceConfig{}, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1462,7 +1462,7 @@ pipeline:
 	}
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
-ModeProxySidecar, baseYAML, &NamespaceConfig{}, overrides, "", "", false)
+		ModeProxySidecar, baseYAML, &NamespaceConfig{}, overrides, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1498,7 +1498,7 @@ func TestEnsurePerAgentConfigMap_ExistingCM_OwnedByWebhook_Updated(t *testing.T)
 	ctx := context.Background()
 
 	_, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
-ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1526,7 +1526,7 @@ func TestEnsurePerAgentConfigMap_ExistingCM_OverwrittenBySSA(t *testing.T) {
 	ctx := context.Background()
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-agent",
-ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1554,7 +1554,7 @@ func TestEnsurePerAgentConfigMap_OwnerReference_SetFromDeployment(t *testing.T) 
 	ctx := context.Background()
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "weather-service",
-ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1581,7 +1581,7 @@ func TestEnsurePerAgentConfigMap_OwnerReference_SetFromStatefulSet(t *testing.T)
 	ctx := context.Background()
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "my-stateful-agent",
-ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1643,7 +1643,7 @@ func TestEnsurePerAgentConfigMap_OwnerReference_NoWorkload_Skipped(t *testing.T)
 	ctx := context.Background()
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "bare-pod-agent",
-ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
+		ModeEnvoySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1666,7 +1666,7 @@ func TestEnsurePerAgentConfigMap_FederatedJWT_MapsToSpiffe(t *testing.T) {
 	}
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "spiffe-agent",
-ModeEnvoySidecar, "", nsConfig, nil, "", "", false)
+		ModeEnvoySidecar, "", nsConfig, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1779,7 +1779,7 @@ func TestEnsurePerAgentConfigMap_MTLSStrict_RendersBlock(t *testing.T) {
 	ctx := context.Background()
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "mtls-agent",
-ModeProxySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, MTLSModeStrict, "", false)
+		ModeProxySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, MTLSModeStrict, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1810,7 +1810,7 @@ func TestEnsurePerAgentConfigMap_MTLSPermissive_RendersBlock(t *testing.T) {
 	ctx := context.Background()
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "mtls-agent",
-ModeProxySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, MTLSModePermissive, "", false)
+		ModeProxySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, MTLSModePermissive, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1845,7 +1845,7 @@ func TestEnsurePerAgentConfigMap_MTLSDisabled_OmitsBlock(t *testing.T) {
 			ctx := context.Background()
 
 			cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "no-mtls-"+tt.name,
-ModeProxySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, tt.mtlsMode, "", false)
+				ModeProxySidecar, "", &NamespaceConfig{ClientAuthType: "client-secret"}, nil, tt.mtlsMode, "", false)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1873,7 +1873,7 @@ func TestEnsurePerAgentConfigMap_MTLSScrubsStaleBlock(t *testing.T) {
 	baseYAML := "mode: proxy-sidecar\nmtls:\n  mode: strict\n"
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "scrub-agent",
-ModeProxySidecar, baseYAML, &NamespaceConfig{ClientAuthType: "client-secret"}, nil, MTLSModeDisabled, "", false)
+		ModeProxySidecar, baseYAML, &NamespaceConfig{ClientAuthType: "client-secret"}, nil, MTLSModeDisabled, "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
