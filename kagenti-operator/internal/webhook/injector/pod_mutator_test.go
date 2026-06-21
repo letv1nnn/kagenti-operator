@@ -1286,7 +1286,7 @@ func TestEnsurePerAgentConfigMap_EmptyBaseYAML_FallbackFromNsConfig(t *testing.T
 	}
 
 	cmName, err := m.ensurePerAgentConfigMap(ctx, "team1", "weather-service",
-ModeProxySidecar, "", nsConfig, nil, "", "", false)
+		ModeProxySidecar, "", nsConfig, nil, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
