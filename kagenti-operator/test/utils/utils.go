@@ -695,7 +695,6 @@ data:
 }
 
 // UndeployController undeploys the controller-manager and uninstalls CRDs.
-// UndeployController undeploys the controller-manager and uninstalls CRDs.
 // Set E2E_CONTROLLER_DEPLOY_SKIP=true to skip when running against a pre-installed operator.
 func UndeployController() {
 	if os.Getenv("E2E_CONTROLLER_DEPLOY_SKIP") == "true" {

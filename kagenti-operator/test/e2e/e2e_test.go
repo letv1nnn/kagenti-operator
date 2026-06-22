@@ -52,7 +52,6 @@ func webhookServiceName() string {
 	return "kagenti-operator-webhook-service"
 }
 
-// namespace where the project is deployed in
 var namespace = controllerNS()
 
 // serviceAccountName created for the project
@@ -253,7 +252,7 @@ var _ = Describe("Manager", Ordered, func() {
 									"capabilities": {
 										"drop": ["ALL"]
 									},
-									"runAsNonRoot": true,
+									"runAsNonRoot": true%s,
 									"seccompProfile": {
 										"type": "RuntimeDefault"
 									}
@@ -261,7 +260,7 @@ var _ = Describe("Manager", Ordered, func() {
 							}],
 							"serviceAccountName": "%s"
 						}
-					}`, curlImage(), curlCmd, serviceAccountName))
+					}`, curlImage(), curlCmd, runAsUserJSON("1000"), serviceAccountName))
 				_, runErr := utils.Run(cmd)
 				if runErr != nil && strings.Contains(runErr.Error(), "already exists") {
 					return nil
