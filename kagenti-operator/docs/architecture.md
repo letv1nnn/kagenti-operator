@@ -83,10 +83,6 @@ The Kagenti Operator is a Kubernetes controller that implements the [Operator Pa
 - Replaces fragile Helm post-install hooks with proper reconciliation loop
 - Uses `SpireBootstrapRunnable` to create initial ZTWIM CR at startup, triggering the controller's watch
 
-#### MLflow Operand Controller
-- Watches DataScienceCluster resources and ensures MLflow CR exists when DSC has `mlflowoperator: Managed`
-- Creates per-namespace OTEL RoleBindings for agent Deployments
-
 ### Supporting Components
 
 #### Webhooks
