@@ -258,7 +258,7 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// 5. Compute config hash from merged configuration (cluster → namespace)
-	configResult, err := ComputeConfigHash(ctx, r.Client, rt.Namespace)
+	configResult, err := ComputeConfigHash(ctx, r.uncachedReader(), rt.Namespace)
 	if err != nil {
 		logger.Error(err, "Failed to compute config hash")
 		r.updateErrorStatus(ctx, req.NamespacedName, ConditionTypeReady, "ConfigHashError", err.Error())
